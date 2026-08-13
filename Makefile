@@ -1,67 +1,56 @@
-# Makefile for zoysh — LLM-powered zsh module
-# Port of yosh (github.com/pizlonator/yosh) to zsh ZLE
-#
-# Phase 1: Pure zsh script (no build needed) — just source zoysh.plugin.zsh
-# Phase 2: C loadable module (requires zsh headers)
-#
-# This Makefile targets Phase 2 (C module development).
+# Makefile for zoysh — LLM-powered zsh assistant
 
-ZSH := $(shell which zsh 2>/dev/null || echo /usr/bin/zsh)
-ZSH_SRC ?= $(HOME)/src/zsh
+ZSH ?= zsh
 PREFIX ?= $(HOME)/.local
+DESTDIR ?=
+INSTALL ?= install
+CC ?= cc
 
-# Module name
-MODULE_NAME := zoysh
+PLUGIN := zoysh.plugin.zsh
+PLUGIN_DIR := $(DESTDIR)$(PREFIX)/share/zsh/plugins/zoysh
+MODULE_SO := zoysh.so
+MODULE_SRCS := src/zoysh.c src/cJSON.c
+ZSH_SRC ?= $(HOME)/src/zsh
+MODULE_CFLAGS ?= -fPIC -shared -Wall -Wextra -O2 -g \
+	-I$(ZSH_SRC)/Src -I$(ZSH_SRC)/Src/Zle -Isrc
 
-# Compiler flags
-CC := gcc
-CFLAGS := -fPIC -shared -Wall -Wextra -O2 -g \
-    -I$(ZSH_SRC)/Src -I$(ZSH_SRC)/Src/Zle \
-    -Isrc
+.DEFAULT_GOAL := check
 
-# Source files (Phase 2 — currently just skeleton)
-SRCS := src/zoysh.c
-OBJS := $(SRCS:.c=.o)
+.PHONY: all check syntax test install uninstall module clean
 
-# Output
-MODULE_SO := $(MODULE_NAME).so
+all: check
 
-.PHONY: all clean install test
+check: syntax test
 
-all: $(MODULE_SO)
+syntax:
+	$(ZSH) -n $(PLUGIN)
+	$(ZSH) -n tests/test.zsh
 
-# Generate zsh module header files (.mdh/.pro) from template
-src/%.mdh: src/%.c
-	@echo "Generating $@ (stub — zsh modimport needed)"
-	@# Real build requires: $(ZSH) $(ZSH_SRC)/Src/mkmodentries.sh
-	@touch $@
-
-# Compile C module
-$(MODULE_SO): $(SRCS) src/cJSON.c
-	$(CC) $(CFLAGS) -o $@ $(SRCS) src/cJSON.c \
-	    -lcurl -lm
-
-# cJSON (from yosh/upstream — MIT licensed)
-src/cJSON.c:
-	@echo "Fetch cJSON from yosh or upstream:"
-	@echo "  cp /tmp/yosh-ref/readline-8.2.13/cJSON.[ch] src/"
-	@exit 1
-
-# Install module
-install: $(MODULE_SO)
-	install -D $(MODULE_SO) $(PREFIX)/lib/zsh/$(MODULE_NAME)/$(MODULE_SO)
-	install -D zoysh.plugin.zsh $(PREFIX)/share/zsh/plugins/$(MODULE_NAME)/$(MODULE_NAME).plugin.zsh
-	@echo "Installed. Add to ~/.zshrc:"
-	@echo "  module_path+=( $(PREFIX)/lib/zsh/$(MODULE_NAME) )"
-	@echo "  zmodload zsh/$(MODULE_NAME)"
-	@echo "OR (script mode):"
-	@echo "  source $(PREFIX)/share/zsh/plugins/$(MODULE_NAME)/$(MODULE_NAME).plugin.zsh"
-
-# Quick test (Phase 1 — script mode)
 test:
-	@echo "=== Phase 1: Script test ==="
-	@ZSH_VERSION=$$($(ZSH) -c 'echo $$ZSH_VERSION') && echo "zsh $$ZSH_VERSION"
-	@$(ZSH) -c 'source zoysh.plugin.zsh; yo --help'
+	$(ZSH) -f -c 'source ./$(PLUGIN); (( ! $${+functions[yo]} ))'
+	$(ZSH) -f -i tests/test.zsh
+	$(ZSH) -f -i -c 'ZOYSH_CONF=/dev/null; source ./$(PLUGIN); source ./$(PLUGIN); (( $${+functions[yo]} )); yo --version >/dev/null'
+
+install: check
+	mkdir -p "$(PLUGIN_DIR)"
+	$(INSTALL) -m 0644 "$(PLUGIN)" "$(PLUGIN_DIR)/$(PLUGIN)"
+	@echo "Installed $(PLUGIN_DIR)/$(PLUGIN)"
+	@echo "Add this to ~/.zshrc: source $(PREFIX)/share/zsh/plugins/zoysh/$(PLUGIN)"
+
+uninstall:
+	rm -f "$(PLUGIN_DIR)/$(PLUGIN)"
+
+# Experimental Phase 2 module. It is deliberately opt-in until the port is complete.
+module:
+	@test -f src/cJSON.c || { \
+		echo "module: src/cJSON.c is missing; the Phase 2 module is not release-ready" >&2; \
+		exit 1; \
+	}
+	@test -f $(ZSH_SRC)/Src/zsh.mdh || { \
+		echo "module: set ZSH_SRC to a configured zsh source tree" >&2; \
+		exit 1; \
+	}
+	$(CC) $(MODULE_CFLAGS) -o $(MODULE_SO) $(MODULE_SRCS) -lcurl -lm
 
 clean:
-	rm -f $(MODULE_SO) $(OBJS) src/*.mdh src/*.pro src/*.mdhi
+	rm -f $(MODULE_SO) src/*.o src/*.mdh src/*.pro src/*.mdhi

@@ -1,4 +1,6 @@
 #!/bin/zsh
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Stefano Tondo
 # zoysh.plugin.zsh — LLM-powered shell assistant for zsh
 # Port of yosh (github.com/pizlonator/yosh) to zsh
 #
@@ -33,62 +35,73 @@ for _dep in curl; do
 done
 unset _dep
 
-# JSON backend: jq preferred (faster), python3 fallback
-typeset -g _ZOYSH_JSON_BACKEND=""
-if command -v jq >/dev/null 2>&1; then
-    _ZOYSH_JSON_BACKEND="jq"
-elif command -v python3 >/dev/null 2>&1; then
-    _ZOYSH_JSON_BACKEND="python3"
-else
-    printf 'zoysh: requires jq or python3 for JSON parsing\n' >&2
+if ! command -v python3 >/dev/null 2>&1; then
+    printf 'zoysh: dependency not found: python3\n' >&2
     return 1
 fi
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
-typeset -g ZOYSH_VERSION="0.2.0"
-typeset -g ZOYSH_CONF="${HOME}/.yoconf"
-typeset -g ZOYSH_HISTORY_LIMIT=10
-typeset -g ZOYSH_TOKEN_BUDGET=4096
+typeset -g ZOYSH_VERSION="0.3.0"
+typeset -g ZOYSH_CONF="${ZOYSH_CONF:-${HOME}/.yoconf}"
+typeset -g ZOYSH_HISTORY_LIMIT="${ZOYSH_HISTORY_LIMIT:-10}"
+typeset -g ZOYSH_TOKEN_BUDGET="${ZOYSH_TOKEN_BUDGET:-4096}"
+typeset -g ZOYSH_TIMEOUT="${ZOYSH_TIMEOUT:-30}"
 typeset -gi ZOYSH_DEBUG=0
 
 # Session memory
 typeset -ga ZOYSH_HISTORY_QUERIES
 typeset -ga ZOYSH_HISTORY_TYPES
 typeset -ga ZOYSH_HISTORY_RESPONSES
-typeset -ga ZOYSH_HISTORY_EXECUTED
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 
-typeset -g ZOYSH_PROVIDER="qwen"
-typeset -g ZOYSH_MODEL="qwythos-9b-v2-mtp"
-typeset -g ZOYSH_BASE_URL="http://127.0.0.1:8001/v1"
-typeset -g ZOYSH_API_KEY="local"
+typeset -g ZOYSH_PROVIDER="${ZOYSH_PROVIDER:-qwen}"
+typeset -g ZOYSH_MODEL="${ZOYSH_MODEL:-qwythos-9b-v2-mtp}"
+typeset -g ZOYSH_BASE_URL="${ZOYSH_BASE_URL:-}"
+typeset -g ZOYSH_API_KEY="${ZOYSH_API_KEY:-}"
 
 _zoysh_load_config() {
     [[ -f "$ZOYSH_CONF" ]] || return 0
     local line key val
     while IFS= read -r line || [[ -n "$line" ]]; do
-        line="${line%%#*}"
         line="${line#"${line%%[![:space:]]*}"}"
         line="${line%"${line##*[![:space:]]}"}"
-        [[ -z "$line" ]] && continue
-        key="${line%% *}"
-        val="${line#* }"
+        [[ -z "$line" || "$line" == \#* ]] && continue
+        line="${line%%[[:space:]]\#*}"
+        line="${line%"${line##*[![:space:]]}"}"
+        key="${line%%[[:space:]]*}"
+        val="${line#${key}}"
         val="${val#"${val%%[![:space:]]*}"}"
         case "$key" in
-            provider)      ZOYSH_PROVIDER="$val" ;;
+            provider)      ZOYSH_PROVIDER="${(L)val}" ;;
             model)         ZOYSH_MODEL="$val" ;;
             base_url)      ZOYSH_BASE_URL="$val" ;;
             key)           ZOYSH_API_KEY="$val" ;;
             history_limit) ZOYSH_HISTORY_LIMIT="$val" ;;
             token_budget)  ZOYSH_TOKEN_BUDGET="$val" ;;
+            timeout)       ZOYSH_TIMEOUT="$val" ;;
         esac
     done < "$ZOYSH_CONF"
 }
 
+_zoysh_validate_config() {
+    if [[ "$ZOYSH_HISTORY_LIMIT" != <-> ]] || (( ZOYSH_HISTORY_LIMIT > 1000 )); then
+        printf 'zoysh: invalid history_limit; using 10\n' >&2
+        ZOYSH_HISTORY_LIMIT=10
+    fi
+    if [[ "$ZOYSH_TOKEN_BUDGET" != <-> ]] || (( ZOYSH_TOKEN_BUDGET < 1 || ZOYSH_TOKEN_BUDGET > 100000 )); then
+        printf 'zoysh: invalid token_budget; using 4096\n' >&2
+        ZOYSH_TOKEN_BUDGET=4096
+    fi
+    if [[ "$ZOYSH_TIMEOUT" != <-> ]] || (( ZOYSH_TIMEOUT < 1 || ZOYSH_TIMEOUT > 600 )); then
+        printf 'zoysh: invalid timeout; using 30\n' >&2
+        ZOYSH_TIMEOUT=30
+    fi
+}
+
 _zoysh_resolve_key() {
-    [[ "$ZOYSH_API_KEY" != "local" && -n "$ZOYSH_API_KEY" ]] && return 0
+    [[ -n "$ZOYSH_API_KEY" ]] && return 0
     local keyfile
     case "$ZOYSH_PROVIDER" in
         anthropic) keyfile="$HOME/.anthropickey" ;;
@@ -99,16 +112,24 @@ _zoysh_resolve_key() {
         zai)       keyfile="$HOME/.zaikey" ;;
         *)         keyfile="$HOME/.yoshkey" ;;
     esac
-    [[ -f "$keyfile" ]] && ZOYSH_API_KEY="$(head -1 "$keyfile" 2>/dev/null)"
+    [[ -r "$keyfile" ]] && IFS= read -r ZOYSH_API_KEY < "$keyfile"
+    [[ -n "$ZOYSH_API_KEY" ]] || ZOYSH_API_KEY="local"
 }
 
 # ─── Provider Helpers ────────────────────────────────────────────────────────
 
 _zoysh_api_endpoint() {
+    local base
     case "$ZOYSH_PROVIDER" in
-        anthropic) print -- "${ZOYSH_BASE_URL:-https://api.anthropic.com/v1}/messages" ;;
-        openai)    print -- "${ZOYSH_BASE_URL:-https://api.openai.com/v1}/responses" ;;
-        *)         local b="${ZOYSH_BASE_URL:-http://127.0.0.1:8001/v1}"; print -- "${b%/}/chat/completions" ;;
+        anthropic)
+            base="${ZOYSH_BASE_URL:-https://api.anthropic.com/v1}"
+            print -- "${base%/}/messages" ;;
+        openai)
+            base="${ZOYSH_BASE_URL:-https://api.openai.com/v1}"
+            print -- "${base%/}/responses" ;;
+        *)
+            base="${ZOYSH_BASE_URL:-http://127.0.0.1:8001/v1}"
+            print -- "${base%/}/chat/completions" ;;
     esac
 }
 
@@ -132,13 +153,12 @@ EOF
 # ─── Session Memory ──────────────────────────────────────────────────────────
 
 _zoysh_history_add() {
-    local query="$1" type="$2" response="$3" executed="${4:-0}"
+    local query="$1" type="$2" response="$3"
     ZOYSH_HISTORY_QUERIES+=("$query")
     ZOYSH_HISTORY_TYPES+=("$type")
     ZOYSH_HISTORY_RESPONSES+=("$response")
-    ZOYSH_HISTORY_EXECUTED+=("$executed")
     while (( ${#ZOYSH_HISTORY_QUERIES[@]} > ZOYSH_HISTORY_LIMIT )); do
-        shift ZOYSH_HISTORY_QUERIES ZOYSH_HISTORY_TYPES ZOYSH_HISTORY_RESPONSES ZOYSH_HISTORY_EXECUTED
+        shift ZOYSH_HISTORY_QUERIES ZOYSH_HISTORY_TYPES ZOYSH_HISTORY_RESPONSES
     done
 }
 
@@ -146,11 +166,91 @@ _zoysh_history_clear() {
     ZOYSH_HISTORY_QUERIES=()
     ZOYSH_HISTORY_TYPES=()
     ZOYSH_HISTORY_RESPONSES=()
-    ZOYSH_HISTORY_EXECUTED=()
     print "zoysh: session memory cleared"
 }
 
 # ─── LLM Call ────────────────────────────────────────────────────────────────
+
+_zoysh_build_request() {
+    local sys_prompt="$1" query="$2" i
+    {
+        printf '%s\0%s\0' "$sys_prompt" "$query"
+        for (( i = 1; i <= ${#ZOYSH_HISTORY_QUERIES[@]}; i++ )); do
+            printf '%s\0%s\0%s\0' \
+                "${ZOYSH_HISTORY_QUERIES[$i]}" \
+                "${ZOYSH_HISTORY_TYPES[$i]}" \
+                "${ZOYSH_HISTORY_RESPONSES[$i]}"
+        done
+    } | ZPROV="$ZOYSH_PROVIDER" ZMOD="$ZOYSH_MODEL" ZTOK="$ZOYSH_TOKEN_BUDGET" python3 -c '
+import json, os, sys
+
+parts = sys.stdin.buffer.read().split(b"\0")
+if parts and not parts[-1]:
+    parts.pop()
+if len(parts) < 2 or (len(parts) - 2) % 3:
+    raise SystemExit("zoysh: invalid request input")
+
+text = lambda value: value.decode("utf-8", "replace")
+system_prompt, query = map(text, parts[:2])
+provider = os.environ["ZPROV"]
+model = os.environ["ZMOD"]
+token_budget = int(os.environ["ZTOK"])
+history = []
+
+for offset in range(2, len(parts), 3):
+    old_query, reply_type, reply = map(text, parts[offset:offset + 3])
+    assistant = {"type": reply_type}
+    assistant["command" if reply_type == "command" else "response"] = reply
+    history.extend((
+        {"role": "user", "content": old_query},
+        {"role": "assistant", "content": json.dumps(assistant, ensure_ascii=False, separators=(",", ":"))},
+    ))
+
+messages = history + [{"role": "user", "content": query}]
+if provider == "anthropic":
+    body = {
+        "model": model,
+        "max_tokens": token_budget,
+        "system": system_prompt,
+        "messages": messages,
+    }
+elif provider == "openai":
+    body = {
+        "model": model,
+        "instructions": system_prompt,
+        "input": messages,
+        "max_output_tokens": token_budget,
+        "store": False,
+    }
+else:
+    body = {
+        "model": model,
+        "messages": [{"role": "system", "content": system_prompt}] + messages,
+        "max_tokens": token_budget,
+        "temperature": 0.3,
+    }
+
+print(json.dumps(body, ensure_ascii=False, separators=(",", ":")))
+'
+}
+
+_zoysh_http_error() {
+    python3 -c '
+import json, sys
+
+raw = sys.stdin.read()
+try:
+    error = json.loads(raw).get("error", {})
+    if isinstance(error, dict):
+        message = error.get("message") or error.get("type") or str(error)
+    else:
+        message = str(error)
+except (ValueError, AttributeError):
+    message = raw.strip()
+message = "".join(char for char in message if char in "\n\t" or ord(char) >= 32)
+print(message[:500] or "empty response")
+'
+}
 
 _zoysh_call_llm() {
     local query="$1"
@@ -158,61 +258,54 @@ _zoysh_call_llm() {
     sys_prompt="$(_zoysh_build_system_prompt)"
     endpoint="$(_zoysh_api_endpoint)"
 
-    # Build messages + request body in a single python3/jq pipeline
-    local request_body response
-    local -a curl_args
-
-    # Construct auth headers WITHOUT leaking key into visible variables
-    curl_args=(-s --max-time 30 "$endpoint" -H "Content-Type: application/json")
-    if [[ "$ZOYSH_PROVIDER" == "anthropic" ]]; then
-        curl_args+=(-H "x-api-key: ${ZOYSH_API_KEY}" -H "anthropic-version: 2023-06-01")
-    else
-        curl_args+=(-H "Authorization: Bearer ${ZOYSH_API_KEY}")
+    if [[ ( "$ZOYSH_PROVIDER" == "anthropic" || "$ZOYSH_PROVIDER" == "openai" ) &&
+          ( -z "$ZOYSH_API_KEY" || "$ZOYSH_API_KEY" == "local" ) ]]; then
+        print -r -- "missing API key for provider ${ZOYSH_PROVIDER}"
+        return 1
     fi
 
-    # Build request body via python3 (always needed for multi-provider formatting)
-    request_body=$(ZSYS="$sys_prompt" ZQ="$query" ZPROV="$ZOYSH_PROVIDER" ZMOD="$ZOYSH_MODEL" \
-        ZHIST_Q="${(j:|:)ZOYSH_HISTORY_QUERIES}" \
-        python3 -c '
-import json, os, sys
+    local request_body raw response http_status error_message
+    local curl_status
+    local -a curl_args
 
-sys_prompt = os.environ["ZSYS"]
-query = os.environ["ZQ"]
-provider = os.environ["ZPROV"]
-model = os.environ["ZMOD"]
-
-messages = [{"role": "system", "content": sys_prompt}]
-messages.append({"role": "user", "content": query})
-
-if provider == "anthropic":
-    sys_msg = ""
-    chat = []
-    for m in messages:
-        if m["role"] == "system": sys_msg = m["content"]
-        else: chat.append(m)
-    body = {"model": model, "max_tokens": 1024, "system": sys_msg, "messages": chat}
-elif provider == "openai":
-    sys_msg = ""
-    chat = []
-    for m in messages:
-        if m["role"] == "system": sys_msg = m["content"]
-        else: chat.append(m)
-    body = {"model": model, "instructions": sys_msg, "input": chat, "max_output_tokens": 1024}
-else:
-    body = {"model": model, "messages": messages, "max_tokens": 1024, "temperature": 0.3}
-
-print(json.dumps(body))
-' 2>&1)
+    request_body=$(_zoysh_build_request "$sys_prompt" "$query") || {
+        print -r -- "failed to build API request"
+        return 1
+    }
 
     [[ $ZOYSH_DEBUG -eq 1 ]] && printf 'DEBUG body: %.200s\n' "$request_body" >&2
 
-    curl_args+=(-d "$request_body")
-    response=$(curl "${curl_args[@]}" 2>/dev/null)
+    curl_args=(-sS --connect-timeout 10 --max-time "$ZOYSH_TIMEOUT"
+        --user-agent "zoysh/${ZOYSH_VERSION}" "$endpoint"
+        -H "Content-Type: application/json" --data-binary @-
+        -w $'\n%{http_code}')
 
-    if [[ $? -ne 0 || -z "$response" ]]; then
-        printf '{"error":"request failed (%s)"}\n' "$endpoint"
+    if [[ "$ZOYSH_PROVIDER" == "anthropic" ]]; then
+        raw=$(printf '%s' "$request_body" | curl "${curl_args[@]}" \
+            -H @<(printf 'x-api-key: %s\nanthropic-version: 2023-06-01\n' "$ZOYSH_API_KEY"))
+    else
+        raw=$(printf '%s' "$request_body" | curl "${curl_args[@]}" \
+            -H @<(printf 'Authorization: Bearer %s\n' "$ZOYSH_API_KEY"))
+    fi
+    curl_status=$?
+
+    if (( curl_status != 0 )); then
+        print -r -- "request failed (curl exit ${curl_status})"
         return 1
     fi
+
+    http_status="${raw##*$'\n'}"
+    response="${raw%$'\n'*}"
+    if [[ "$http_status" != 2[0-9][0-9] ]]; then
+        error_message=$(printf '%s' "$response" | _zoysh_http_error)
+        print -r -- "API request failed (HTTP ${http_status}): ${error_message}"
+        return 1
+    fi
+    if [[ -z "$response" ]]; then
+        print -r -- "API returned an empty response"
+        return 1
+    fi
+
     print -r -- "$response"
 }
 
@@ -226,57 +319,94 @@ import json, sys, os, re
 raw = os.environ["ZRESP"]
 provider = os.environ["ZPROV"]
 
+separator = "\x1e"
+unsafe_controls = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+bidi_controls = dict.fromkeys(map(ord, "\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"), None)
+
+def emit(kind, value, explanation=""):
+    fields = (kind, value, explanation)
+    clean = lambda field: unsafe_controls.sub("", str(field)).translate(bidi_controls)
+    sys.stdout.write(separator.join(clean(field) for field in fields))
+
 try:
     r = json.loads(raw)
-except:
-    print("chat\nError: invalid API response")
+except (TypeError, ValueError):
+    emit("error", "invalid API response")
+    sys.exit(0)
+
+if not isinstance(r, dict):
+    emit("error", "unrecognized API response")
+    sys.exit(0)
+
+if r.get("error"):
+    error = r["error"]
+    message = error.get("message") or error.get("type") if isinstance(error, dict) else str(error)
+    emit("error", "API error: " + str(message))
     sys.exit(0)
 
 content = ""
+truncated = False
 if provider == "anthropic":
+    truncated = r.get("stop_reason") == "max_tokens"
     for b in r.get("content", []):
-        if b.get("type") == "text": content = b["text"]; break
+        if isinstance(b, dict) and b.get("type") == "text":
+            content += b.get("text", "")
 elif provider == "openai":
+    truncated = r.get("status") == "incomplete"
     for item in r.get("output", []):
+        if not isinstance(item, dict):
+            continue
         if item.get("type") == "message":
             for c in item.get("content", []):
-                if c.get("type") == "output_text": content = c["text"]; break
-            break
+                if not isinstance(c, dict):
+                    continue
+                if c.get("type") == "output_text":
+                    content += c.get("text", "")
+                elif c.get("type") == "refusal":
+                    emit("error", c.get("refusal", "request refused"))
+                    sys.exit(0)
 else:
-    try: content = r["choices"][0]["message"]["content"]
-    except:
-        err = r.get("error", {})
-        msg = err.get("message", str(r)[:200]) if isinstance(err, dict) else str(err)[:200]
-        print("chat\nAPI error: " + msg)
+    try:
+        choice = r["choices"][0]
+        truncated = choice.get("finish_reason") == "length"
+        content = choice["message"]["content"]
+        if isinstance(content, list):
+            content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
+    except (KeyError, IndexError, TypeError):
+        emit("error", "unrecognized API response")
         sys.exit(0)
 
 # Strip <think> blocks (local reasoning models)
-content = re.sub(r"<think>.*?</think>\s*", "", content, flags=re.DOTALL).strip()
+content = re.sub(r"<think>.*?</think>\s*", "", str(content), flags=re.DOTALL).strip()
+content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content, flags=re.IGNORECASE).strip()
 
 # Parse JSON
 try:
     d = json.loads(content)
     if d.get("type") == "command":
-        print("command")
-        print(d.get("command", ""))
-        print(d.get("explanation", ""))
+        command = d.get("command", "")
+        emit("command" if command else "error", command or "model returned an empty command", d.get("explanation", ""))
     else:
-        print("chat")
-        print(d.get("response", str(d)))
-except:
-    # Fallback: extract first JSON object
-    m = re.search(r"\{[^{}]*\}", content)
-    if m:
+        emit("chat", d.get("response", str(d)))
+except (TypeError, ValueError, AttributeError):
+    if truncated:
+        emit("error", "model response was truncated; increase token_budget")
+        sys.exit(0)
+    decoder = json.JSONDecoder()
+    for start, char in enumerate(content):
+        if char != "{":
+            continue
         try:
-            d = json.loads(m.group())
+            d, _ = decoder.raw_decode(content[start:])
             if d.get("type") == "command":
-                print("command\n" + d.get("command","") + "\n" + d.get("explanation",""))
+                command = d.get("command", "")
+                emit("command" if command else "error", command or "model returned an empty command", d.get("explanation", ""))
             else:
-                print("chat\n" + d.get("response",""))
+                emit("chat", d.get("response", ""))
             sys.exit(0)
-        except: pass
-    print("chat")
-    print(content[:500] if content else "(empty)")
+        except (TypeError, ValueError, AttributeError):
+            pass
+    emit("chat", content[:4000] if content else "(empty)")
 '
 }
 
@@ -287,6 +417,7 @@ _zoysh_print_error()  { printf '\n\033[31mzoysh: %s\033[0m\n\n' "$1" }
 _zoysh_print_command() { [[ -n "$2" ]] && printf '\033[90m%s\033[0m\n' "$2" }
 
 _zoysh_thinking_animation() {
+    [[ -t 2 ]] || return 0
     {
         local frames="⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏" i=0
         while true; do
@@ -319,65 +450,63 @@ yo() {
                 printf '  yo <natural language>    Generate a shell command\n'
                 printf '  yo -c <question>         Ask a question inline\n'
                 printf '  yo --clear               Clear session memory\n'
+                printf '  yo --version             Show version\n'
                 printf '  yo --help                Show this help\n\n'
-                printf 'Config: ~/.yoconf\n'
-                printf 'Backend: %s/%s @ %s\n' "$ZOYSH_PROVIDER" "$ZOYSH_MODEL" "$ZOYSH_BASE_URL"
-                printf 'JSON: %s\n' "$_ZOYSH_JSON_BACKEND"
+                printf 'Config: %s\n' "$ZOYSH_CONF"
+                printf 'Backend: %s/%s @ %s\n' "$ZOYSH_PROVIDER" "$ZOYSH_MODEL" "$(_zoysh_api_endpoint)"
                 return 0 ;;
             --clear) _zoysh_history_clear; return 0 ;;
+            --version) printf 'zoysh %s\n' "$ZOYSH_VERSION"; return 0 ;;
             --debug) ZOYSH_DEBUG=1; shift ;;
-            *) break ;;
+            --) shift; break ;;
+            *) _zoysh_print_error "unknown option: $1"; return 2 ;;
         esac
     done
 
-    local query="$*"
+    local user_query="$*" query="$*"
     [[ -z "$query" ]] && { print "Usage: yo <natural language>"; return 1 }
 
     (( chat_mode )) && query="Answer this (do NOT generate a command): $query"
 
     _zoysh_thinking_animation
-    local response
-    response=$(_zoysh_call_llm "$query")
-    _zoysh_stop_spinner
+    local response call_status
+    {
+        response=$(_zoysh_call_llm "$query")
+        call_status=$?
+    } always {
+        _zoysh_stop_spinner
+    }
 
-    if [[ -z "$response" ]] || [[ "$response" == *"\"error\""* ]]; then
-        local err
-        err=$(print -r -- "$response" | python3 -c "import json,sys; print(json.load(sys.stdin).get('error','unknown'))" 2>/dev/null)
-        _zoysh_print_error "${err:-API call failed}"
+    if (( call_status != 0 )) || [[ -z "$response" ]]; then
+        _zoysh_print_error "${response:-API call failed}"
         return 1
     fi
 
     local parsed rtype rcontent rexplanation
     parsed=$(_zoysh_parse_response "$response")
-    rtype="${parsed%%$'\n'*}"
-    local _rest="${parsed#*$'\n'}"
-    rcontent="${_rest%%$'\n'*}"
+    rtype="${parsed%%$'\x1e'*}"
+    local _rest="${parsed#*$'\x1e'}"
+    rcontent="${_rest%%$'\x1e'*}"
+    rexplanation="${_rest#*$'\x1e'}"
 
     if [[ "$rtype" == "command" ]]; then
-        rexplanation="${_rest#*$'\n'}"
         _zoysh_print_command "$rcontent" "$rexplanation"
-        _zoysh_history_add "$query" "command" "$rcontent" 0
+        _zoysh_history_add "$user_query" "command" "$rcontent"
         print -z "$rcontent"
+    elif [[ "$rtype" == "error" ]]; then
+        _zoysh_print_error "$rcontent"
+        return 1
     else
         _zoysh_print_chat "$rcontent"
-        _zoysh_history_add "$query" "chat" "$rcontent" 0
-    fi
-}
-
-_zoysh_preexec() {
-    local last_idx=${#ZOYSH_HISTORY_TYPES[@]}
-    if (( last_idx > 0 )) && [[ "${ZOYSH_HISTORY_TYPES[$last_idx]}" == "command" ]]; then
-        ZOYSH_HISTORY_EXECUTED[$last_idx]=1
+        _zoysh_history_add "$user_query" "chat" "$rcontent"
     fi
 }
 
 # ─── Init ────────────────────────────────────────────────────────────────────
 
 _zoysh_load_config
+_zoysh_validate_config
 _zoysh_resolve_key
-
-autoload -Uz add-zsh-hook
-add-zsh-hook preexec _zoysh_preexec
 
 # Completion
 _yo() {
@@ -385,7 +514,11 @@ _yo() {
         '-c[ask a question]:question:' \
         '--chat[ask a question]:question:' \
         '--clear[clear session memory]' \
+        '--version[show version]' \
+        '--debug[show request diagnostics]' \
         '--help[show help]' \
         '*:natural language query:'
 }
-compdef _yo yo 2>/dev/null
+(( ${+functions[compdef]} )) && compdef _yo yo
+
+return 0

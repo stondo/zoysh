@@ -5,35 +5,38 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     strategy:
+      fail-fast: false
       matrix:
-        zsh-version: ["5.8", "5.9"]
+        os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - name: Install zsh + deps
+      - name: Install zsh on Ubuntu
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y zsh
+
+      - name: Show dependency versions
         run: |
-          sudo apt-get update
-          sudo apt-get install -y zsh curl python3 jq
+          zsh --version
+          curl --version | head -1
+          python3 --version
 
-      - name: Syntax check
-        run: zsh -n zoysh.plugin.zsh
+      - name: Run release checks
+        run: make check
 
-      - name: Plugin loads without error
-        run: zsh -ic 'source zoysh.plugin.zsh; echo "loaded OK"'
-
-      - name: Idempotency (double source)
-        run: zsh -ic 'source zoysh.plugin.zsh; source zoysh.plugin.zsh; echo "double OK"'
-
-      - name: Non-interactive safety
-        run: zsh -c 'source zoysh.plugin.zsh; echo "non-interactive OK"'
-
-      - name: Help output
-        run: zsh -ic 'source zoysh.plugin.zsh; yo --help'
-
-      - name: Session clear
-        run: zsh -ic 'source zoysh.plugin.zsh; yo --clear'
+      - name: Verify staged install
+        run: |
+          stage="$(mktemp -d)"
+          make install DESTDIR="$stage" PREFIX=/usr/local
+          test -f "$stage/usr/local/share/zsh/plugins/zoysh/zoysh.plugin.zsh"

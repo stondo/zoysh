@@ -1,0 +1,8 @@
+Zoysh
+Copyright (C) 2026 Stefano Tondo
+
+Zoysh is distributed under the GNU General Public License, version 3 only.
+
+The project is a zsh port inspired by yosh by Fil Pizlo. The experimental Phase 2
+module may later incorporate code derived from yosh, GNU Bash, GNU Readline, and
+cJSON; retain the applicable upstream copyright and license notices when doing so.

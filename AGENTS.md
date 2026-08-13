@@ -7,7 +7,7 @@
 ## Architecture
 
 ### Phase 1 (current): Pure zsh script
-- `zoysh.plugin.zsh` — the entire MVP. `yo()` function, config loading, API calls via curl, JSON parsing via python3, command prefill via `print -z`.
+- `zoysh.plugin.zsh` — the entire MVP. `yo()` function, config loading, API calls via curl, JSON handling via python3, bounded session context, and command prefill via `print -z`.
 - No compilation needed. Source it in `.zshrc`.
 
 ### Phase 2 (planned): C loadable zsh module
@@ -38,10 +38,12 @@
 # Phase 1: no build needed
 source zoysh.plugin.zsh
 
-# Phase 2: C module
-make            # build zoysh.so
-make install    # install to ~/.local
-make test       # quick test
+# Phase 1 checks and install
+make check      # syntax + fixture tests
+make install    # install the script plugin to ~/.local
+
+# Phase 2: experimental, incomplete C module
+make module     # requires zsh sources and the planned cJSON files
 ```
 
 ## Reference: yosh's yo.c structure
@@ -84,8 +86,8 @@ token_budget 4096
 make test
 
 # Manual test
-zsh -c 'source zoysh.plugin.zsh; yo --help'
-zsh -c 'source zoysh.plugin.zsh; yo list all python files'
+zsh -f -i -c 'ZOYSH_CONF=/dev/null; source zoysh.plugin.zsh; yo --help'
+zsh -f -i -c 'source zoysh.plugin.zsh; yo list all python files'
 ```
 
 ## Conventions

@@ -4,6 +4,8 @@ LLM-powered shell assistant for zsh. Port of [yosh](https://github.com/pizlonato
 
 Type `yo <natural language>` at your zsh prompt. Get a command prefilled for review, or an inline answer.
 
+> Zoysh never executes generated commands. It places them in the prompt so you can inspect and edit them first.
+
 ```
 $ yo find all python files modified today
 find . -type f -name "*.py" -newermt "$(date +%Y-%m-%d)"
@@ -52,10 +54,9 @@ echo 'source /path/to/zoysh.plugin.zsh' >> ~/.zshrc
 |------------|----------|-------|
 | **zsh >= 5.8** | Yes | |
 | **curl** | Yes | API calls |
-| **jq** | One of | JSON parsing (preferred, faster) |
-| **python3 >= 3.8** | One of | JSON parsing (fallback) |
+| **python3 >= 3.8** | Yes | Safe JSON request/response handling |
 
-The plugin auto-detects `jq` or `python3` at load time. `jq` is recommended (~3ms vs ~80ms per call).
+No zsh framework or compiled extension is required.
 
 ## Configuration
 
@@ -76,13 +77,18 @@ key local
 
 # Session memory
 history_limit 10
+
+# Maximum output tokens and HTTP timeout in seconds
+token_budget 4096
+timeout 30
 ```
 
 If `~/.yoconf` doesn't exist, defaults to local model at `http://127.0.0.1:8001/v1/`.
+For `anthropic` and `openai`, omitting `base_url` selects the provider's official API endpoint.
 
 ### API key files
 
-If no `key` in config, zoysh checks these files (mode 0600, single line):
+If no `key` is configured, zoysh checks these single-line files. Set their mode to `0600`.
 
 | Provider | Key file |
 |----------|----------|
@@ -101,6 +107,7 @@ If no `key` in config, zoysh checks these files (mode 0600, single line):
 | `yo <query>` | Generate a shell command (prefilled at prompt) |
 | `yo -c <question>` | Ask a question, get inline answer |
 | `yo --clear` | Clear session memory |
+| `yo --version` | Show the installed version |
 | `yo --help` | Show help and current config |
 
 ## Features
@@ -111,8 +118,15 @@ If no `key` in config, zoysh checks these files (mode 0600, single line):
 - **Multi-provider** — Anthropic, OpenAI, Kimi, DeepSeek, Qwen, z.ai, local models
 - **Terminal-aware** — includes OS, shell version, pwd, git branch in context
 - **Thinking-aware** — strips `<think>` blocks from local reasoning models
-- **jq preferred** — fast JSON parsing when available, python3 fallback
+- **Private OpenAI requests** — sets `store: false` on Responses API calls
+- **Multiline-safe** — preserves multiline answers and generated commands
 - **Config-compatible with yosh** — same `~/.yoconf` format
+
+## Privacy and safety
+
+The query, current directory, operating system, zsh version, git branch, and bounded in-memory session history are sent to the configured API endpoint. Zoysh does not collect telemetry or persist conversation history. API keys are read from config or provider key files and are passed to curl through a file-descriptor-backed header source, keeping them out of curl's process arguments.
+
+Generated commands are untrusted model output. Zoysh only prefills the prompt; review every command before pressing Enter, especially commands that modify files, permissions, packages, or remote systems.
 
 ## Roadmap
 
@@ -122,7 +136,7 @@ If no `key` in config, zoysh checks these files (mode 0600, single line):
 - [x] Session memory
 - [x] Multi-provider support
 - [x] Config file (`~/.yoconf`)
-- [x] jq + python3 JSON backends
+- [x] Python JSON request/response handling
 - [x] Plugin manager compatibility (zinit, antidote, zplug, oh-my-zsh)
 - [x] CI testing
 - [ ] Session history with scrollback context
@@ -147,6 +161,24 @@ Phase 2 (planned):
                 PTY proxy <- scrollback <- terminal I/O <-+
 ```
 
+## Development
+
+Run all release checks:
+
+```sh
+make check
+```
+
+Install the script plugin under `PREFIX` (defaults to `~/.local`):
+
+```sh
+make install
+```
+
+The experimental C module is not part of the Phase 1 release. `make module` is opt-in and requires a configured zsh source tree plus the planned cJSON sources.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow and [SECURITY.md](SECURITY.md) for private vulnerability reporting.
+
 ## Credits
 
 - **Original concept and LLM logic**: [Fil Pizlo](https://github.com/pizlonator) — [yosh](https://github.com/pizlonator/yosh)
@@ -154,4 +186,4 @@ Phase 2 (planned):
 
 ## License
 
-GPL-3.0 (inherited from yosh / GNU Bash / GNU Readline).
+GPL-3.0-only. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

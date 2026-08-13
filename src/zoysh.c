@@ -1,4 +1,7 @@
 /*
+ * SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Stefano Tondo
+ *
  * zoysh.mdh — zsh module definition header
  *
  * Declares the zoysh zsh module for LLM-powered shell assistance.
