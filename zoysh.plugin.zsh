@@ -44,23 +44,95 @@ fi
 
 typeset -g ZOYSH_VERSION="0.3.0"
 typeset -g ZOYSH_CONF="${ZOYSH_CONF:-${HOME}/.yoconf}"
-typeset -g ZOYSH_HISTORY_LIMIT="${ZOYSH_HISTORY_LIMIT:-10}"
-typeset -g ZOYSH_TOKEN_BUDGET="${ZOYSH_TOKEN_BUDGET:-4096}"
-typeset -g ZOYSH_TIMEOUT="${ZOYSH_TIMEOUT:-30}"
 typeset -gi ZOYSH_DEBUG=0
+
+# Preserve environment-provided values as reload defaults. The config file is
+# re-read for every yo invocation, matching yosh.
+typeset -gr _ZOYSH_DEFAULT_PROVIDER="${ZOYSH_PROVIDER:-qwen}"
+typeset -gr _ZOYSH_DEFAULT_MODEL="${ZOYSH_MODEL:-qwythos-9b-v2-mtp}"
+typeset -gr _ZOYSH_DEFAULT_BASE_URL="${ZOYSH_BASE_URL:-}"
+typeset -gr _ZOYSH_DEFAULT_API_KEY="${ZOYSH_API_KEY:-}"
+typeset -gr _ZOYSH_DEFAULT_HISTORY_LIMIT="${ZOYSH_HISTORY_LIMIT:-10}"
+typeset -gr _ZOYSH_DEFAULT_TOKEN_BUDGET="${ZOYSH_TOKEN_BUDGET:-4096}"
+typeset -gr _ZOYSH_DEFAULT_MAX_OUTPUT_TOKENS="${ZOYSH_MAX_OUTPUT_TOKENS:-4096}"
+typeset -gr _ZOYSH_DEFAULT_TIMEOUT="${ZOYSH_TIMEOUT:-30}"
+typeset -gr _ZOYSH_DEFAULT_SERVER_WEB="${ZOYSH_SERVER_WEB:-1}"
+typeset -gr _ZOYSH_DEFAULT_CHAT_PREFIX=${ZOYSH_CHAT_PREFIX:-$'\033[1;36myo\033[0m\n'}
+typeset -gr _ZOYSH_DEFAULT_COLOR_PREFIX=${ZOYSH_COLOR_PREFIX:-$'\033[0m'}
+typeset -gr _ZOYSH_DEFAULT_COLOR_RESET=${ZOYSH_COLOR_RESET:-$'\033[0m'}
+typeset -gr _ZOYSH_DEFAULT_ENABLE_ITALIC=${ZOYSH_ENABLE_ITALIC:-$'\033[3m'}
+typeset -gr _ZOYSH_DEFAULT_DISABLE_ITALIC=${ZOYSH_DISABLE_ITALIC:-$'\033[23m'}
+typeset -gr _ZOYSH_DEFAULT_ENABLE_BOLD=${ZOYSH_ENABLE_BOLD:-$'\033[1m'}
+typeset -gr _ZOYSH_DEFAULT_DISABLE_BOLD=${ZOYSH_DISABLE_BOLD:-$'\033[22m'}
+typeset -gr _ZOYSH_DEFAULT_ENABLE_STRIKETHROUGH=${ZOYSH_ENABLE_STRIKETHROUGH:-$'\033[9m'}
+typeset -gr _ZOYSH_DEFAULT_DISABLE_STRIKETHROUGH=${ZOYSH_DISABLE_STRIKETHROUGH:-$'\033[29m'}
+typeset -gr _ZOYSH_DEFAULT_CODE_DELIMITER=${ZOYSH_CODE_DELIMITER:-$'\033[38;5;109m'}
 
 # Session memory
 typeset -ga ZOYSH_HISTORY_QUERIES
 typeset -ga ZOYSH_HISTORY_TYPES
 typeset -ga ZOYSH_HISTORY_RESPONSES
 
-# ─── Config ───────────────────────────────────────────────────────────────────
-
-typeset -g ZOYSH_PROVIDER="${ZOYSH_PROVIDER:-qwen}"
-typeset -g ZOYSH_MODEL="${ZOYSH_MODEL:-qwythos-9b-v2-mtp}"
-typeset -g ZOYSH_BASE_URL="${ZOYSH_BASE_URL:-}"
-typeset -g ZOYSH_API_KEY="${ZOYSH_API_KEY:-}"
+# Runtime config
+typeset -g ZOYSH_PROVIDER
+typeset -g ZOYSH_MODEL
+typeset -g ZOYSH_BASE_URL
+typeset -g ZOYSH_API_KEY
+typeset -g ZOYSH_HISTORY_LIMIT
+typeset -g ZOYSH_TOKEN_BUDGET
+typeset -g ZOYSH_MAX_OUTPUT_TOKENS
+typeset -g ZOYSH_TIMEOUT
+typeset -g ZOYSH_SERVER_WEB
+typeset -g ZOYSH_CHAT_PREFIX
+typeset -g ZOYSH_COLOR_PREFIX
+typeset -g ZOYSH_COLOR_RESET
+typeset -g ZOYSH_ENABLE_ITALIC
+typeset -g ZOYSH_DISABLE_ITALIC
+typeset -g ZOYSH_ENABLE_BOLD
+typeset -g ZOYSH_DISABLE_BOLD
+typeset -g ZOYSH_ENABLE_STRIKETHROUGH
+typeset -g ZOYSH_DISABLE_STRIKETHROUGH
+typeset -g ZOYSH_CODE_DELIMITER
+typeset -g ZOYSH_SCROLLBACK_ENABLED=0
+typeset -g ZOYSH_SCROLLBACK_BYTES=1048576
+typeset -g ZOYSH_SCROLLBACK_LINES=1000
 typeset -g _ZOYSH_BACKEND_ERROR=""
+typeset -gi _ZOYSH_SCROLLBACK_WARNED=0
+
+_zoysh_reset_config() {
+    ZOYSH_PROVIDER="$_ZOYSH_DEFAULT_PROVIDER"
+    ZOYSH_MODEL="$_ZOYSH_DEFAULT_MODEL"
+    ZOYSH_BASE_URL="$_ZOYSH_DEFAULT_BASE_URL"
+    ZOYSH_API_KEY="$_ZOYSH_DEFAULT_API_KEY"
+    ZOYSH_HISTORY_LIMIT="$_ZOYSH_DEFAULT_HISTORY_LIMIT"
+    ZOYSH_TOKEN_BUDGET="$_ZOYSH_DEFAULT_TOKEN_BUDGET"
+    ZOYSH_MAX_OUTPUT_TOKENS="$_ZOYSH_DEFAULT_MAX_OUTPUT_TOKENS"
+    ZOYSH_TIMEOUT="$_ZOYSH_DEFAULT_TIMEOUT"
+    ZOYSH_SERVER_WEB="$_ZOYSH_DEFAULT_SERVER_WEB"
+    ZOYSH_CHAT_PREFIX="$_ZOYSH_DEFAULT_CHAT_PREFIX"
+    ZOYSH_COLOR_PREFIX="$_ZOYSH_DEFAULT_COLOR_PREFIX"
+    ZOYSH_COLOR_RESET="$_ZOYSH_DEFAULT_COLOR_RESET"
+    ZOYSH_ENABLE_ITALIC="$_ZOYSH_DEFAULT_ENABLE_ITALIC"
+    ZOYSH_DISABLE_ITALIC="$_ZOYSH_DEFAULT_DISABLE_ITALIC"
+    ZOYSH_ENABLE_BOLD="$_ZOYSH_DEFAULT_ENABLE_BOLD"
+    ZOYSH_DISABLE_BOLD="$_ZOYSH_DEFAULT_DISABLE_BOLD"
+    ZOYSH_ENABLE_STRIKETHROUGH="$_ZOYSH_DEFAULT_ENABLE_STRIKETHROUGH"
+    ZOYSH_DISABLE_STRIKETHROUGH="$_ZOYSH_DEFAULT_DISABLE_STRIKETHROUGH"
+    ZOYSH_CODE_DELIMITER="$_ZOYSH_DEFAULT_CODE_DELIMITER"
+    ZOYSH_SCROLLBACK_ENABLED=0
+    ZOYSH_SCROLLBACK_BYTES=1048576
+    ZOYSH_SCROLLBACK_LINES=1000
+}
+
+_zoysh_decode_config_value() {
+    local value="$1"
+    if (( ${#value} >= 2 )) &&
+       [[ ( "${value[1]}" == '"' && "${value[-1]}" == '"' ) ||
+          ( "${value[1]}" == "'" && "${value[-1]}" == "'" ) ]]; then
+        value="${value[2,-2]}"
+    fi
+    printf -v REPLY '%b' "$value"
+}
 
 _zoysh_load_config() {
     [[ -f "$ZOYSH_CONF" ]] || return 0
@@ -81,7 +153,33 @@ _zoysh_load_config() {
             key)           ZOYSH_API_KEY="$val" ;;
             history_limit) ZOYSH_HISTORY_LIMIT="$val" ;;
             token_budget)  ZOYSH_TOKEN_BUDGET="$val" ;;
+            max_output_tokens) ZOYSH_MAX_OUTPUT_TOKENS="$val" ;;
             timeout)       ZOYSH_TIMEOUT="$val" ;;
+            server_web)    ZOYSH_SERVER_WEB="$val" ;;
+            scrollback_enabled) ZOYSH_SCROLLBACK_ENABLED="$val" ;;
+            scrollback_bytes)   ZOYSH_SCROLLBACK_BYTES="$val" ;;
+            scrollback_lines)   ZOYSH_SCROLLBACK_LINES="$val" ;;
+            chat_prefix)
+                _zoysh_decode_config_value "$val"; ZOYSH_CHAT_PREFIX="$REPLY" ;;
+            color_prefix)
+                _zoysh_decode_config_value "$val"; ZOYSH_COLOR_PREFIX="$REPLY" ;;
+            chat_reset|color_reset)
+                _zoysh_decode_config_value "$val"; ZOYSH_COLOR_RESET="$REPLY" ;;
+            enable_italic)
+                _zoysh_decode_config_value "$val"; ZOYSH_ENABLE_ITALIC="$REPLY" ;;
+            disable_italic)
+                _zoysh_decode_config_value "$val"; ZOYSH_DISABLE_ITALIC="$REPLY" ;;
+            enable_bold)
+                _zoysh_decode_config_value "$val"; ZOYSH_ENABLE_BOLD="$REPLY" ;;
+            disable_bold)
+                _zoysh_decode_config_value "$val"; ZOYSH_DISABLE_BOLD="$REPLY" ;;
+            enable_strikethrough)
+                _zoysh_decode_config_value "$val"; ZOYSH_ENABLE_STRIKETHROUGH="$REPLY" ;;
+            disable_strikethrough)
+                _zoysh_decode_config_value "$val"; ZOYSH_DISABLE_STRIKETHROUGH="$REPLY" ;;
+            code_delimiter)
+                _zoysh_decode_config_value "$val"; ZOYSH_CODE_DELIMITER="$REPLY" ;;
+            *) printf 'zoysh: %s: unknown directive: %s\n' "$ZOYSH_CONF" "$key" >&2 ;;
         esac
     done < "$ZOYSH_CONF"
 }
@@ -91,13 +189,37 @@ _zoysh_validate_config() {
         printf 'zoysh: invalid history_limit; using 10\n' >&2
         ZOYSH_HISTORY_LIMIT=10
     fi
-    if [[ "$ZOYSH_TOKEN_BUDGET" != <-> ]] || (( ZOYSH_TOKEN_BUDGET < 1 || ZOYSH_TOKEN_BUDGET > 100000 )); then
+    if [[ "$ZOYSH_TOKEN_BUDGET" != <-> ]] || (( ZOYSH_TOKEN_BUDGET < 100 || ZOYSH_TOKEN_BUDGET > 1000000 )); then
         printf 'zoysh: invalid token_budget; using 4096\n' >&2
         ZOYSH_TOKEN_BUDGET=4096
+    fi
+    if [[ "$ZOYSH_MAX_OUTPUT_TOKENS" != <-> ]] || (( ZOYSH_MAX_OUTPUT_TOKENS < 1 || ZOYSH_MAX_OUTPUT_TOKENS > 100000 )); then
+        printf 'zoysh: invalid max_output_tokens; using 4096\n' >&2
+        ZOYSH_MAX_OUTPUT_TOKENS=4096
     fi
     if [[ "$ZOYSH_TIMEOUT" != <-> ]] || (( ZOYSH_TIMEOUT < 1 || ZOYSH_TIMEOUT > 600 )); then
         printf 'zoysh: invalid timeout; using 30\n' >&2
         ZOYSH_TIMEOUT=30
+    fi
+    if [[ "$ZOYSH_SERVER_WEB" != 0 && "$ZOYSH_SERVER_WEB" != 1 ]]; then
+        printf 'zoysh: invalid server_web; using 1\n' >&2
+        ZOYSH_SERVER_WEB=1
+    fi
+    if [[ "$ZOYSH_SCROLLBACK_ENABLED" != 0 && "$ZOYSH_SCROLLBACK_ENABLED" != 1 ]]; then
+        printf 'zoysh: invalid scrollback_enabled; using 0\n' >&2
+        ZOYSH_SCROLLBACK_ENABLED=0
+    fi
+    if [[ "$ZOYSH_SCROLLBACK_BYTES" != <-> ]] || (( ZOYSH_SCROLLBACK_BYTES < 1 )); then
+        printf 'zoysh: invalid scrollback_bytes; using 1048576\n' >&2
+        ZOYSH_SCROLLBACK_BYTES=1048576
+    fi
+    if [[ "$ZOYSH_SCROLLBACK_LINES" != <-> ]] || (( ZOYSH_SCROLLBACK_LINES < 1 )); then
+        printf 'zoysh: invalid scrollback_lines; using 1000\n' >&2
+        ZOYSH_SCROLLBACK_LINES=1000
+    fi
+    if (( ZOYSH_SCROLLBACK_ENABLED && ! _ZOYSH_SCROLLBACK_WARNED )); then
+        printf 'zoysh: scrollback capture requires the planned native module and is unavailable in the script plugin\n' >&2
+        _ZOYSH_SCROLLBACK_WARNED=1
     fi
 }
 
@@ -115,6 +237,14 @@ _zoysh_resolve_key() {
     esac
     [[ -r "$keyfile" ]] && IFS= read -r ZOYSH_API_KEY < "$keyfile"
     [[ -n "$ZOYSH_API_KEY" ]] || ZOYSH_API_KEY="local"
+}
+
+_zoysh_reload_config() {
+    _zoysh_reset_config
+    _zoysh_load_config
+    _zoysh_validate_config
+    _zoysh_resolve_key
+    (( ${+functions[_zoysh_history_prune]} )) && _zoysh_history_prune
 }
 
 # ─── Provider Helpers ────────────────────────────────────────────────────────
@@ -211,20 +341,39 @@ Respond with ONLY a JSON object:
 - Shell command: {"type":"command","command":"<zsh command>","explanation":"<brief>"}
 - Informational: {"type":"chat","response":"<answer>"}
 
-Rules: valid JSON only. No markdown. Prefer zsh syntax. Keep explanations to 1 sentence.
+Rules: output valid JSON only and never wrap it in a markdown fence. Prefer zsh syntax. Keep command explanations to 1 sentence. In chat responses, use concise terminal-friendly Markdown (headings, lists, emphasis, and code fences); avoid LaTeX and write math as readable plain text.
 EOF
 }
 
 # ─── Session Memory ──────────────────────────────────────────────────────────
+
+_zoysh_history_estimated_tokens() {
+    local LC_ALL=C
+    local total=0 i
+    for (( i = 1; i <= ${#ZOYSH_HISTORY_QUERIES[@]}; i++ )); do
+        (( total += ${#ZOYSH_HISTORY_QUERIES[$i]} + ${#ZOYSH_HISTORY_RESPONSES[$i]} ))
+    done
+    REPLY=$(( total / 4 ))
+}
+
+_zoysh_history_prune() {
+    while (( ${#ZOYSH_HISTORY_QUERIES[@]} > ZOYSH_HISTORY_LIMIT )); do
+        shift ZOYSH_HISTORY_QUERIES ZOYSH_HISTORY_TYPES ZOYSH_HISTORY_RESPONSES
+    done
+
+    _zoysh_history_estimated_tokens
+    while (( ${#ZOYSH_HISTORY_QUERIES[@]} > 0 && REPLY > ZOYSH_TOKEN_BUDGET )); do
+        shift ZOYSH_HISTORY_QUERIES ZOYSH_HISTORY_TYPES ZOYSH_HISTORY_RESPONSES
+        _zoysh_history_estimated_tokens
+    done
+}
 
 _zoysh_history_add() {
     local query="$1" type="$2" response="$3"
     ZOYSH_HISTORY_QUERIES+=("$query")
     ZOYSH_HISTORY_TYPES+=("$type")
     ZOYSH_HISTORY_RESPONSES+=("$response")
-    while (( ${#ZOYSH_HISTORY_QUERIES[@]} > ZOYSH_HISTORY_LIMIT )); do
-        shift ZOYSH_HISTORY_QUERIES ZOYSH_HISTORY_TYPES ZOYSH_HISTORY_RESPONSES
-    done
+    _zoysh_history_prune
 }
 
 _zoysh_history_clear() {
@@ -246,7 +395,8 @@ _zoysh_build_request() {
                 "${ZOYSH_HISTORY_TYPES[$i]}" \
                 "${ZOYSH_HISTORY_RESPONSES[$i]}"
         done
-    } | ZPROV="$ZOYSH_PROVIDER" ZMOD="$ZOYSH_MODEL" ZTOK="$ZOYSH_TOKEN_BUDGET" python3 -c '
+    } | ZPROV="$ZOYSH_PROVIDER" ZMOD="$ZOYSH_MODEL" \
+        ZMAX="$ZOYSH_MAX_OUTPUT_TOKENS" ZWEB="$ZOYSH_SERVER_WEB" python3 -c '
 import json, os, sys
 
 parts = sys.stdin.buffer.read().split(b"\0")
@@ -259,7 +409,8 @@ text = lambda value: value.decode("utf-8", "replace")
 system_prompt, query = map(text, parts[:2])
 provider = os.environ["ZPROV"]
 model = os.environ["ZMOD"]
-token_budget = int(os.environ["ZTOK"])
+max_output_tokens = int(os.environ["ZMAX"])
+server_web = os.environ["ZWEB"] == "1"
 history = []
 
 for offset in range(2, len(parts), 3):
@@ -275,23 +426,30 @@ messages = history + [{"role": "user", "content": query}]
 if provider == "anthropic":
     body = {
         "model": model,
-        "max_tokens": token_budget,
+        "max_tokens": max_output_tokens,
         "system": system_prompt,
         "messages": messages,
     }
+    if server_web:
+        body["tools"] = [
+            {"type": "web_search_20250305", "name": "web_search", "max_uses": 5},
+            {"type": "web_fetch_20250910", "name": "web_fetch", "max_uses": 3},
+        ]
 elif provider == "openai":
     body = {
         "model": model,
         "instructions": system_prompt,
         "input": messages,
-        "max_output_tokens": token_budget,
+        "max_output_tokens": max_output_tokens,
         "store": False,
     }
+    if server_web:
+        body["tools"] = [{"type": "web_search"}]
 else:
     body = {
         "model": model,
         "messages": [{"role": "system", "content": system_prompt}] + messages,
-        "max_tokens": token_budget,
+        "max_tokens": max_output_tokens,
         "temperature": 0.3,
     }
 
@@ -344,6 +502,10 @@ _zoysh_call_llm() {
         --user-agent "zoysh/${ZOYSH_VERSION}" "$endpoint"
         -H "Content-Type: application/json" --data-binary @-
         -w $'\n%{http_code}')
+
+    if [[ "$ZOYSH_PROVIDER" == "anthropic" && "$ZOYSH_SERVER_WEB" == 1 ]]; then
+        curl_args+=(-H "anthropic-beta: web-fetch-2025-09-10")
+    fi
 
     if [[ "$ZOYSH_PROVIDER" == "anthropic" ]]; then
         raw=$(printf '%s' "$request_body" | curl "${curl_args[@]}" \
@@ -455,7 +617,7 @@ try:
         emit("chat", d.get("response", str(d)))
 except (TypeError, ValueError, AttributeError):
     if truncated:
-        emit("error", "model response was truncated; increase token_budget")
+        emit("error", "model response was truncated; increase max_output_tokens")
         sys.exit(0)
     decoder = json.JSONDecoder()
     for start, char in enumerate(content):
@@ -477,14 +639,105 @@ except (TypeError, ValueError, AttributeError):
 
 # ─── Display ─────────────────────────────────────────────────────────────────
 
-_zoysh_print_chat()   { printf '\n\033[3;36m%s\033[0m\n\n' "$1" }
-_zoysh_print_error()  { printf '\n\033[31mzoysh: %s\033[0m\n\n' "$1" }
-_zoysh_print_command() { [[ -n "$2" ]] && printf '\033[90m%s\033[0m\n' "$2" }
+_zoysh_render_markdown() {
+    ZBASE="$ZOYSH_COLOR_PREFIX" ZRESET="$ZOYSH_COLOR_RESET" \
+    ZITALIC="$ZOYSH_ENABLE_ITALIC" ZNOITALIC="$ZOYSH_DISABLE_ITALIC" \
+    ZBOLD="$ZOYSH_ENABLE_BOLD" ZNOBOLD="$ZOYSH_DISABLE_BOLD" \
+    ZSTRIKE="$ZOYSH_ENABLE_STRIKETHROUGH" ZNOSTRIKE="$ZOYSH_DISABLE_STRIKETHROUGH" \
+    ZCODE="$ZOYSH_CODE_DELIMITER" python3 -c '
+import os, re, sys
+
+base = os.environ["ZBASE"]
+reset = os.environ["ZRESET"]
+italic = os.environ["ZITALIC"]
+noitalic = os.environ["ZNOITALIC"]
+bold = os.environ["ZBOLD"]
+nobold = os.environ["ZNOBOLD"]
+strike = os.environ["ZSTRIKE"]
+nostrike = os.environ["ZNOSTRIKE"]
+code = os.environ["ZCODE"]
+
+def render_inline(value):
+    protected = []
+
+    def protect(style, content):
+        token = f"\uf000{len(protected)}\uf001"
+        protected.append(style + content + reset + base)
+        return token
+
+    value = re.sub(r"`([^`\n]+)`", lambda m: protect(code, m.group(1)), value)
+    value = re.sub(r"(?<!\\)\$(?=\S)(.+?)(?<=\S)\$", lambda m: protect(code, m.group(1)), value)
+    value = re.sub(r"\*\*(?=\S)(.+?)(?<=\S)\*\*", lambda m: bold + m.group(1) + nobold, value)
+    value = re.sub(r"__(?=\S)(.+?)(?<=\S)__", lambda m: bold + m.group(1) + nobold, value)
+    value = re.sub(r"~~(?=\S)(.+?)(?<=\S)~~", lambda m: strike + m.group(1) + nostrike, value)
+    value = re.sub(r"(?<!\*)\*(?=\S)(.+?)(?<=\S)\*(?!\*)", lambda m: italic + m.group(1) + noitalic, value)
+    value = re.sub(r"\\([\\`*_{}\[\]()#+.!$-])", r"\1", value)
+
+    for index, rendered in enumerate(protected):
+        value = value.replace(f"\uf000{index}\uf001", rendered)
+    return value
+
+output = []
+in_fence = False
+for line in sys.stdin.read().strip("\n").split("\n"):
+    stripped = line.lstrip()
+    if stripped.startswith("```"):
+        if in_fence:
+            output.append(code + "└─" + reset + base)
+            in_fence = False
+        else:
+            language = stripped[3:].strip()
+            output.append(code + "┌─" + (f" {language}" if language else "") + reset + base)
+            in_fence = True
+        continue
+
+    if in_fence:
+        output.append(code + "│ " + line + reset + base)
+        continue
+
+    heading = re.match(r"^\s{0,3}#{1,6}\s+(.+)$", line)
+    if heading:
+        output.append(bold + render_inline(heading.group(1)) + nobold)
+        continue
+
+    bullet = re.match(r"^(\s*)[-+*]\s+(.+)$", line)
+    if bullet:
+        output.append(bullet.group(1) + "• " + render_inline(bullet.group(2)))
+        continue
+
+    quote = re.match(r"^\s*>\s?(.*)$", line)
+    if quote:
+        output.append(code + "│ " + reset + base + render_inline(quote.group(1)))
+        continue
+
+    output.append(render_inline(line))
+
+if in_fence:
+    output.append(code + "└─" + reset + base)
+
+sys.stdout.write("\n".join(output))
+'
+}
+
+_zoysh_print_chat() {
+    printf '\n%s%s' "$ZOYSH_CHAT_PREFIX" "$ZOYSH_COLOR_PREFIX"
+    printf '%s' "$1" | _zoysh_render_markdown
+    printf '%s\n\n' "$ZOYSH_COLOR_RESET"
+}
+
+_zoysh_print_error() {
+    printf '\n\033[1;31merror\033[0m \033[31m%s\033[0m\n\n' "$1"
+}
+
+_zoysh_print_command() {
+    [[ -n "$2" ]] && printf '\033[90m↳ %s\033[0m\n' "$2"
+}
 
 # ─── yo Command ──────────────────────────────────────────────────────────────
 
 yo() {
     local chat_mode=0
+    _zoysh_reload_config
     while [[ "$1" == -* ]]; do
         case "$1" in
             -c|--chat)  chat_mode=1; shift ;;
@@ -506,6 +759,13 @@ yo() {
                 else
                     printf 'Backend: unavailable @ %s\n' "$(_zoysh_api_endpoint)"
                     printf 'Status: %s\n' "$_ZOYSH_BACKEND_ERROR"
+                fi
+                printf 'History: %s exchanges / ~%s tokens\n' "$ZOYSH_HISTORY_LIMIT" "$ZOYSH_TOKEN_BUDGET"
+                printf 'Generation: %s tokens / %ss timeout\n' "$ZOYSH_MAX_OUTPUT_TOKENS" "$ZOYSH_TIMEOUT"
+                if (( ZOYSH_SERVER_WEB )); then
+                    printf 'Hosted web search: enabled (Anthropic/OpenAI only)\n'
+                else
+                    printf 'Hosted web search: disabled\n'
                 fi
                 return 0 ;;
             --clear) _zoysh_history_clear; return 0 ;;
@@ -557,9 +817,7 @@ yo() {
 
 # ─── Init ────────────────────────────────────────────────────────────────────
 
-_zoysh_load_config
-_zoysh_validate_config
-_zoysh_resolve_key
+_zoysh_reload_config
 
 # Completion
 _yo() {

@@ -69,7 +69,7 @@ The source to port lives at `readline-8.2.13/yo.c` in the yosh repo (5553 LOC). 
 
 ## Config format
 
-`~/.yoconf` (identical to yosh):
+`~/.yoconf` (all portable yosh directives; PTY scrollback remains Phase 2):
 ```
 provider qwen
 model qwythos-9b-v2-mtp
@@ -77,6 +77,9 @@ base_url http://127.0.0.1:8001/v1/
 key local
 history_limit 10
 token_budget 4096
+max_output_tokens 4096
+timeout 30
+server_web 1
 ```
 
 ## Testing
@@ -92,7 +95,7 @@ zsh -f -i -c 'source zoysh.plugin.zsh; yo list all python files'
 
 ## Conventions
 
-- Config-compatible with yosh (`~/.yoconf` format)
+- Compatible with yosh's portable `~/.yoconf` directives; PTY scrollback settings are recognized but unavailable in Phase 1
 - Default provider: local model (`http://127.0.0.1:8001/v1/`)
 - No external zsh framework dependencies (no oh-my-zsh, no zinit required)
 - GPL-3.0 license (inherited from yosh/bash/readline)

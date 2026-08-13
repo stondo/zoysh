@@ -60,35 +60,61 @@ No zsh framework or compiled extension is required.
 
 ## Configuration
 
-Config file: `~/.yoconf` (same format as yosh)
+Config file: `~/.yoconf`. It is optional and is re-read before every `yo` command, so edits take effect immediately.
 
 ```conf
-# Provider: qwen, kimi, deepseek, anthropic, openai, zai
 provider qwen
-
-# Model name
-model qwythos-9b-v2-mtp
-
-# Base URL (for local models)
 base_url http://127.0.0.1:8001/v1/
-
-# API key (or use key files: ~/.qwenkey, ~/.anthropickey, etc.)
 key local
 
-# Session memory
 history_limit 10
-
-# Maximum output tokens and HTTP timeout in seconds
 token_budget 4096
+max_output_tokens 4096
 timeout 30
+server_web 1
 ```
 
-If `~/.yoconf` doesn't exist, zoysh defaults to the local OpenAI-compatible API at `http://127.0.0.1:8001/v1/`. Before each request it reads `/models`, uses the configured model when it is loaded, or automatically selects the first model reported by the server. If the server is unavailable or reports no loaded models, `yo` stops with instructions to start the server and load one.
-For `anthropic` and `openai`, omitting `base_url` selects the provider's official API endpoint.
+| Directive | Default | Description |
+|-----------|---------|-------------|
+| `provider` | `qwen` | `qwen`, `kimi`, `deepseek`, `anthropic`, `openai`, or `zai` |
+| `model` | auto-detected locally | Preferred model ID; local servers are queried through `/models` |
+| `base_url` | `http://127.0.0.1:8001/v1/` | API base URL; omitted Anthropic/OpenAI URLs use their official APIs |
+| `key` | provider key file or `local` | API key |
+| `history_limit` | `10` | Maximum remembered `yo` exchanges |
+| `token_budget` | `4096` | Approximate token budget for remembered conversation history |
+| `max_output_tokens` | `4096` | Maximum tokens generated for one response |
+| `timeout` | `30` | HTTP timeout in seconds |
+| `server_web` | `1` | Enable hosted web search for Anthropic Messages and OpenAI Responses |
+| `chat_prefix` | cyan `yo` heading | Text printed before chat responses |
+| `color_prefix` | terminal reset | Base chat text style |
+| `chat_reset` / `color_reset` | terminal reset | Style emitted after chat output |
+| `enable_italic` / `disable_italic` | ANSI italic toggles | Rendering for Markdown emphasis |
+| `enable_bold` / `disable_bold` | ANSI bold toggles | Rendering for Markdown bold |
+| `enable_strikethrough` / `disable_strikethrough` | ANSI strike toggles | Rendering for Markdown strikethrough |
+| `code_delimiter` | muted cyan | Rendering for inline math/code and fenced code blocks |
+
+Display values accept optional quotes and C-style escapes such as `\033`, `\n`, `\t`, and `\\`. For example, a plain no-color theme is:
+
+```conf
+chat_prefix "yo> "
+color_prefix ""
+color_reset ""
+enable_italic ""
+disable_italic ""
+enable_bold ""
+disable_bold ""
+enable_strikethrough ""
+disable_strikethrough ""
+code_delimiter ""
+```
+
+Yosh's `scrollback_enabled`, `scrollback_bytes`, and `scrollback_lines` directives are recognized for forward compatibility. The script plugin defaults scrollback capture to disabled and warns if it is enabled: capturing arbitrary child-process output requires the planned PTY-backed native module.
+
+If `~/.yoconf` doesn't exist, zoysh uses the local OpenAI-compatible API at `http://127.0.0.1:8001/v1/`. Before each request it reads `/models`, keeps the configured model if available, or selects the first model reported by the server. If the server is unavailable or has no loaded model, `yo` explains what to start or load.
 
 ### Changing the model
 
-For a local server, `model` is optional because zoysh detects the loaded model automatically. Set it when the server exposes multiple models and you want to prefer a specific one:
+For a local server, `model` is optional. Set it when the server exposes multiple models and you want to prefer one:
 
 ```conf
 provider qwen
@@ -97,15 +123,15 @@ base_url http://127.0.0.1:8001/v1/
 key local
 ```
 
-For an OpenAI-compatible local server, list its available model IDs with:
+List available local model IDs with:
 
 ```sh
 curl -s http://127.0.0.1:8001/v1/models | python3 -m json.tool
 ```
 
-Zoysh reads `~/.yoconf` when the plugin loads. After changing it, start a new shell with `exec zsh`, then verify the selected backend with `yo --help`. `yo --help` and normal requests refresh local model detection in the running shell; they do not rewrite `~/.yoconf`.
+Verify the selected backend with `yo --help`. Local detection updates the running shell but never rewrites `~/.yoconf`.
 
-You can also ignore the config file and override the model for one new zsh process:
+To ignore the config file and override the model for one new zsh process:
 
 ```sh
 ZOYSH_CONF=/dev/null ZOYSH_MODEL=another-model zsh
@@ -141,15 +167,19 @@ If no `key` is configured, zoysh checks these single-line files. Set their mode 
 - **Inline Q&A** — ask questions without leaving the terminal
 - **Session memory** — remembers conversation context within a session
 - **Multi-provider** — Anthropic, OpenAI, Kimi, DeepSeek, Qwen, z.ai, local models
-- **Terminal-aware** — includes OS, shell version, pwd, git branch in context
+- **Shell-aware** — includes OS, zsh version, working directory, and git branch in context
 - **Thinking-aware** — strips `<think>` blocks from local reasoning models
+- **Terminal Markdown** — renders headings, emphasis, lists, quotes, inline math/code, and fenced code
+- **Hosted web search** — optional Anthropic and OpenAI server-side search tools
 - **Private OpenAI requests** — sets `store: false` on Responses API calls
 - **Multiline-safe** — preserves multiline answers and generated commands
-- **Config-compatible with yosh** — same `~/.yoconf` format
+- **Yosh-compatible configuration** — supports every portable `~/.yoconf` directive
 
 ## Privacy and safety
 
 The query, current directory, operating system, zsh version, git branch, and bounded in-memory session history are sent to the configured API endpoint. Zoysh does not collect telemetry or persist conversation history. API keys are read from config or provider key files and are passed to curl through a file-descriptor-backed header source, keeping them out of curl's process arguments.
+
+When `server_web 1` is used with Anthropic or OpenAI, the provider may send search queries to its web-search service. Set `server_web 0` to prevent zoysh from enabling those tools.
 
 Generated commands are untrusted model output. Zoysh only prefills the prompt; review every command before pressing Enter, especially commands that modify files, permissions, packages, or remote systems.
 
@@ -162,15 +192,17 @@ Generated commands are untrusted model output. Zoysh only prefills the prompt; r
 - [x] Multi-provider support
 - [x] Config file (`~/.yoconf`)
 - [x] Python JSON request/response handling
+- [x] Yosh-compatible config reload and display directives
+- [x] Terminal Markdown rendering
+- [x] Hosted web-search tools
 - [x] Plugin manager compatibility (zinit, antidote, zplug, oh-my-zsh)
 - [x] CI testing
 
-The following are future Phase 1 enhancements, not missing v0.3.0 release requirements:
+Streaming responses remain a possible Phase 1 enhancement:
 
-- [ ] Session history with scrollback context
 - [ ] Streaming responses
 
-Session memory currently includes earlier `yo` queries and responses only; it does not capture arbitrary terminal output.
+Session memory includes earlier `yo` exchanges. Arbitrary terminal-output capture remains a Phase 2 feature because it requires a PTY proxy.
 
 ### Phase 2: C loadable module (planned)
 

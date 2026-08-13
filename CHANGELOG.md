@@ -4,11 +4,21 @@ All notable changes to Zoysh are documented here. The project follows [Semantic 
 
 ## [Unreleased]
 
+### Added
+
+- Terminal Markdown rendering with configurable yosh-compatible styles.
+- Hosted Anthropic web-search/web-fetch and OpenAI web-search request tools.
+- `max_output_tokens` configuration, separating generation limits from the history budget.
+- Parsing and validation for all portable yosh configuration directives.
+
 ### Changed
 
 - Removed the background thinking spinner so interactive zsh does not print job start and termination notices around every request.
 - Automatically detect models served by local OpenAI-compatible backends before each request and explain how to recover when the server is unavailable or has no model loaded.
 - Clarified missing-config status in `yo --help`; `~/.yoconf` remains optional.
+- Re-read `~/.yoconf` before every command so edits apply without restarting zsh.
+- Corrected `token_budget` to prune conversation history using yosh's four-characters-per-token estimate.
+- Added a clear warning when PTY-only scrollback capture is requested from the script plugin.
 
 ## [0.3.0] - 2026-08-13
 
