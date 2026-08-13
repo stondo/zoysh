@@ -1,26 +1,61 @@
 # Zoysh
 
-LLM-powered shell assistant for zsh. Port of [yosh](https://github.com/pizlonator/yosh) (Fil Pizlo's LLM-enabled bash fork) to zsh via ZLE.
+LLM-powered shell assistant for zsh. Port of [yosh](https://github.com/pizlonator/yosh) (Fil Pizlo's LLM-enabled bash fork) to zsh.
 
 Type `yo <natural language>` at your zsh prompt. Get a command prefilled for review, or an inline answer.
 
 ```
 $ yo find all python files modified today
-find . -name "*.py" -mtime 0
+find . -type f -name "*.py" -newermt "$(date +%Y-%m-%d)"
 # ↑ prefilled at your prompt — press Enter to run, or edit first
 
 $ yo -c what does the -exec flag in find do?
-The -exec flag in find runs a command on each matched file...
+The -exec flag runs a command on each matched file...
 ```
 
-## Quick Start
+## Installation
+
+### zinit
 
 ```zsh
-# Source the plugin (Phase 1 — pure zsh, no compilation needed)
-source ~/PARA/Projects/zoysh/zoysh.plugin.zsh
+zinit light stondo/zoysh
 ```
 
-That's it. Uses your local model by default.
+### antidote
+
+```zsh
+echo "stondo/zoysh" >> ~/.zsh_plugins.txt
+```
+
+### oh-my-zsh
+
+```zsh
+git clone https://github.com/stondo/zoysh.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zoysh
+# Then add 'zoysh' to your plugins=(... zoysh) in ~/.zshrc
+```
+
+### zplug
+
+```zsh
+zplug "stondo/zoysh"
+```
+
+### manual
+
+```zsh
+echo 'source /path/to/zoysh.plugin.zsh' >> ~/.zshrc
+```
+
+## Dependencies
+
+| Dependency | Required | Notes |
+|------------|----------|-------|
+| **zsh >= 5.8** | Yes | |
+| **curl** | Yes | API calls |
+| **jq** | One of | JSON parsing (preferred, faster) |
+| **python3 >= 3.8** | One of | JSON parsing (fallback) |
+
+The plugin auto-detects `jq` or `python3` at load time. `jq` is recommended (~3ms vs ~80ms per call).
 
 ## Configuration
 
@@ -41,10 +76,23 @@ key local
 
 # Session memory
 history_limit 10
-token_budget 4096
 ```
 
 If `~/.yoconf` doesn't exist, defaults to local model at `http://127.0.0.1:8001/v1/`.
+
+### API key files
+
+If no `key` in config, zoysh checks these files (mode 0600, single line):
+
+| Provider | Key file |
+|----------|----------|
+| anthropic | `~/.anthropickey` |
+| openai | `~/.openaikey` |
+| kimi | `~/.kimikey` |
+| deepseek | `~/.deepseekkey` |
+| qwen | `~/.qwenkey` |
+| zai | `~/.zaikey` |
+| (fallback) | `~/.yoshkey` |
 
 ## Usage
 
@@ -53,60 +101,57 @@ If `~/.yoconf` doesn't exist, defaults to local model at `http://127.0.0.1:8001/
 | `yo <query>` | Generate a shell command (prefilled at prompt) |
 | `yo -c <question>` | Ask a question, get inline answer |
 | `yo --clear` | Clear session memory |
-| `yo --help` | Show help |
+| `yo --help` | Show help and current config |
 
 ## Features
 
 - **Command generation** — natural language to zsh command, prefilled for review
 - **Inline Q&A** — ask questions without leaving the terminal
 - **Session memory** — remembers conversation context within a session
-- **Multi-provider** — Anthropic, OpenAI, Kimi, DeepSeek, Qwen, z.ai, local
+- **Multi-provider** — Anthropic, OpenAI, Kimi, DeepSeek, Qwen, z.ai, local models
 - **Terminal-aware** — includes OS, shell version, pwd, git branch in context
+- **Thinking-aware** — strips `<think>` blocks from local reasoning models
+- **jq preferred** — fast JSON parsing when available, python3 fallback
 - **Config-compatible with yosh** — same `~/.yoconf` format
 
 ## Roadmap
 
-### Phase 1: Script MVP (current)
+### Phase 1: Script Plugin (current)
 - [x] `yo` command via zsh function
 - [x] Command prefilling via `print -z`
 - [x] Session memory
-- [x] Multi-provider support (Chat Completions + Anthropic + OpenAI)
+- [x] Multi-provider support
 - [x] Config file (`~/.yoconf`)
-- [x] Terminal-aware system prompt
+- [x] jq + python3 JSON backends
+- [x] Plugin manager compatibility (zinit, antidote, zplug, oh-my-zsh)
+- [x] CI testing
+- [ ] Session history with scrollback context
+- [ ] Streaming responses
 
 ### Phase 2: C Loadable Module
-- [ ] Port `yo.c` core (LLM API logic, ~5500 LOC) from yosh
+- [ ] Port `yo.c` core (LLM API logic) from yosh
 - [ ] ZLE widget registration
-- [ ] PTY proxy for scrollback capture (LLM can see terminal output)
+- [ ] PTY proxy for scrollback capture
 - [ ] Multi-step task continuation
 - [ ] Ctrl-C cancellation (self-pipe signal trick)
-- [ ] Markdown rendering for chat output
-- [ ] ZLE keybinding (e.g., `Ctrl-O` to submit buffer to yo)
-
-### Phase 3: Advanced
-- [ ] Web search integration (Anthropic/OpenAI server-side tools)
-- [ ] zsh-specific context (vcs_info, hooks, completions)
-- [ ] Streaming responses
-- [ ] Fuzzy command history
 
 ## Architecture
 
 ```
 Phase 1 (current):
-  zsh prompt → yo() function → curl → LLM API → parse JSON → print -z (prefill)
+  zsh prompt -> yo() -> curl -> LLM API -> parse JSON -> print -z (prefill)
 
 Phase 2 (planned):
-  zsh prompt → ZLE widget → C module (ported yo.c) → LLM API
-                    ↑                                          ↓
-                PTY proxy ← scrollback buffer ← terminal I/O ←┘
+  zsh prompt -> ZLE widget -> C module -> LLM API
+                    ^                               v
+                PTY proxy <- scrollback <- terminal I/O <-+
 ```
 
 ## Credits
 
 - **Original concept and LLM logic**: [Fil Pizlo](https://github.com/pizlonator) — [yosh](https://github.com/pizlonator/yosh)
-- **zsh port**: Stefano Tondo
-- **cJSON**: [Dave Gamble](https://github.com/DaveGamble/cJSON) (MIT)
+- **zsh port**: [Stefano Tondo](https://github.com/stondo)
 
 ## License
 
-GPL-3.0 (inherited from yosh/GNU Bash/GNU Readline). cJSON is MIT.
+GPL-3.0 (inherited from yosh / GNU Bash / GNU Readline).
