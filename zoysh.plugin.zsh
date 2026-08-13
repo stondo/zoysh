@@ -257,6 +257,14 @@ _zoysh_resolve_key() {
         return 0
     fi
 
+    # Accept z.ai's conventional environment variable in addition to zoysh's
+    # provider-neutral ZOYSH_API_KEY. This is resolved at invocation time so a
+    # key exported after the plugin was sourced is picked up immediately.
+    if [[ "$ZOYSH_PROVIDER" == "zai" && -n "${ZAI_API_KEY:-}" ]]; then
+        ZOYSH_API_KEY="$ZAI_API_KEY"
+        return 0
+    fi
+
     local keyfile
     case "$ZOYSH_PROVIDER" in
         anthropic) keyfile="$HOME/.anthropickey" ;;

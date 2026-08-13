@@ -4,6 +4,10 @@ All notable changes to Zoysh are documented here. The project follows [Semantic 
 
 ## [Unreleased]
 
+### Added
+
+- Accept z.ai's standard `ZAI_API_KEY` environment variable as a credential source.
+
 ## [0.3.0] - 2026-08-14
 
 ### Added

@@ -276,6 +276,13 @@ ZOYSH_API_KEY=""
 _zoysh_resolve_key
 assert_eq "file-key" "$ZOYSH_API_KEY" "missing key loads provider key file"
 
+ZAI_API_KEY="env-key"
+ZOYSH_PROVIDER=zai
+ZOYSH_API_KEY=""
+_zoysh_resolve_key
+assert_eq "env-key" "$ZOYSH_API_KEY" "z.ai loads its conventional environment key"
+unset ZAI_API_KEY
+
 _zoysh_call_llm() {
     print -r -- '{"choices":[{"message":{"content":"{\"type\":\"chat\",\"response\":\"quiet response\"}"}}]}'
 }

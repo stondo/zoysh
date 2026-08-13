@@ -152,9 +152,11 @@ To ignore the config file and override the model for one new zsh process:
 ZOYSH_CONF=/dev/null ZOYSH_MODEL=another-model zsh
 ```
 
-### API key files
+### API keys
 
-If no `key` is configured, zoysh checks these single-line files. Set their mode to `0600`.
+Keys are resolved in this order: the `key` directive, `ZOYSH_API_KEY`, z.ai's
+standard `ZAI_API_KEY`, then the provider's single-line key file. Set key-file
+permissions to `0600`.
 
 | Provider | Key file |
 |----------|----------|
@@ -230,14 +232,17 @@ Phase 2 is experimental and is not part of the script-plugin release. The reposi
 
 ## Architecture
 
-```
-Phase 1 (current):
-  zsh prompt -> yo() -> curl -> LLM API -> parse JSON -> print -z (prefill)
+```mermaid
+flowchart LR
+  subgraph phase1["Phase 1 — current script plugin"]
+    P1Prompt["zsh prompt"] --> Yo["yo()"] --> Curl["curl"] --> API1["LLM API"]
+    API1 --> Parse["parse JSON"] --> Prefill["print -z<br/>prefill"]
+  end
 
-Phase 2 (planned):
-  zsh prompt -> ZLE widget -> C module -> LLM API
-                    ^                               v
-                PTY proxy <- scrollback <- terminal I/O <-+
+  subgraph phase2["Phase 2 — planned native module"]
+    P2Prompt["zsh prompt"] --> ZLE["ZLE widget"] --> Module["C module"] --> API2["LLM API"]
+    API2 --> Terminal["terminal I/O"] --> Scrollback["scrollback"] --> PTY["PTY proxy"] --> Module
+  end
 ```
 
 ## Development
