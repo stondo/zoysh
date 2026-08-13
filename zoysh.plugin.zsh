@@ -10,7 +10,7 @@
 #   manual:  source /path/to/zoysh.plugin.zsh
 #
 # Config in ~/.yoconf (same format as yosh):
-#   provider qwen
+#   provider local
 #   model qwythos-9b-v2-mtp
 #   base_url http://127.0.0.1:8001/v1/
 
@@ -48,8 +48,8 @@ typeset -gi ZOYSH_DEBUG=0
 
 # Preserve environment-provided values as reload defaults. The config file is
 # re-read for every yo invocation, matching yosh.
-typeset -gr _ZOYSH_DEFAULT_PROVIDER="${ZOYSH_PROVIDER:-qwen}"
-typeset -gr _ZOYSH_DEFAULT_MODEL="${ZOYSH_MODEL:-qwythos-9b-v2-mtp}"
+typeset -gr _ZOYSH_DEFAULT_PROVIDER="${ZOYSH_PROVIDER:-local}"
+typeset -gr _ZOYSH_DEFAULT_MODEL="${ZOYSH_MODEL:-}"
 typeset -gr _ZOYSH_DEFAULT_BASE_URL="${ZOYSH_BASE_URL:-}"
 typeset -gr _ZOYSH_DEFAULT_API_KEY="${ZOYSH_API_KEY:-}"
 typeset -gr _ZOYSH_DEFAULT_HISTORY_LIMIT="${ZOYSH_HISTORY_LIMIT:-10}"
@@ -98,10 +98,12 @@ typeset -g ZOYSH_SCROLLBACK_BYTES=1048576
 typeset -g ZOYSH_SCROLLBACK_LINES=1000
 typeset -g _ZOYSH_BACKEND_ERROR=""
 typeset -gi _ZOYSH_SCROLLBACK_WARNED=0
+typeset -gi _ZOYSH_MODEL_EXPLICIT=0
 
 _zoysh_reset_config() {
     ZOYSH_PROVIDER="$_ZOYSH_DEFAULT_PROVIDER"
     ZOYSH_MODEL="$_ZOYSH_DEFAULT_MODEL"
+    [[ -n "$_ZOYSH_DEFAULT_MODEL" ]] && _ZOYSH_MODEL_EXPLICIT=1 || _ZOYSH_MODEL_EXPLICIT=0
     ZOYSH_BASE_URL="$_ZOYSH_DEFAULT_BASE_URL"
     ZOYSH_API_KEY="$_ZOYSH_DEFAULT_API_KEY"
     ZOYSH_HISTORY_LIMIT="$_ZOYSH_DEFAULT_HISTORY_LIMIT"
@@ -148,7 +150,7 @@ _zoysh_load_config() {
         val="${val#"${val%%[![:space:]]*}"}"
         case "$key" in
             provider)      ZOYSH_PROVIDER="${(L)val}" ;;
-            model)         ZOYSH_MODEL="$val" ;;
+            model)         ZOYSH_MODEL="$val"; _ZOYSH_MODEL_EXPLICIT=1 ;;
             base_url)      ZOYSH_BASE_URL="$val" ;;
             key)           ZOYSH_API_KEY="$val" ;;
             history_limit) ZOYSH_HISTORY_LIMIT="$val" ;;
@@ -185,6 +187,13 @@ _zoysh_load_config() {
 }
 
 _zoysh_validate_config() {
+    case "$ZOYSH_PROVIDER" in
+        local|anthropic|openai|kimi|deepseek|qwen|zai) ;;
+        *)
+            printf 'zoysh: unsupported provider %s; using local\n' "$ZOYSH_PROVIDER" >&2
+            ZOYSH_PROVIDER=local
+            ;;
+    esac
     if [[ "$ZOYSH_HISTORY_LIMIT" != <-> ]] || (( ZOYSH_HISTORY_LIMIT > 1000 )); then
         printf 'zoysh: invalid history_limit; using 10\n' >&2
         ZOYSH_HISTORY_LIMIT=10
@@ -223,8 +232,31 @@ _zoysh_validate_config() {
     fi
 }
 
+_zoysh_resolve_model() {
+    (( _ZOYSH_MODEL_EXPLICIT )) && return 0
+
+    if _zoysh_local_base_url >/dev/null; then
+        ZOYSH_MODEL=""
+        return 0
+    fi
+
+    case "$ZOYSH_PROVIDER" in
+        anthropic) ZOYSH_MODEL="claude-sonnet-4-5-20250929" ;;
+        openai)    ZOYSH_MODEL="gpt-5.2" ;;
+        kimi)      ZOYSH_MODEL="kimi-k2.5" ;;
+        deepseek)  ZOYSH_MODEL="deepseek-v4-flash" ;;
+        qwen)      ZOYSH_MODEL="qwen-plus" ;;
+        zai)       ZOYSH_MODEL="glm-5.2" ;;
+    esac
+}
+
 _zoysh_resolve_key() {
     [[ -n "$ZOYSH_API_KEY" ]] && return 0
+    if _zoysh_local_base_url >/dev/null; then
+        ZOYSH_API_KEY="local"
+        return 0
+    fi
+
     local keyfile
     case "$ZOYSH_PROVIDER" in
         anthropic) keyfile="$HOME/.anthropickey" ;;
@@ -233,16 +265,16 @@ _zoysh_resolve_key() {
         deepseek)  keyfile="$HOME/.deepseekkey" ;;
         qwen)      keyfile="$HOME/.qwenkey" ;;
         zai)       keyfile="$HOME/.zaikey" ;;
-        *)         keyfile="$HOME/.yoshkey" ;;
+        *)         return 0 ;;
     esac
     [[ -r "$keyfile" ]] && IFS= read -r ZOYSH_API_KEY < "$keyfile"
-    [[ -n "$ZOYSH_API_KEY" ]] || ZOYSH_API_KEY="local"
 }
 
 _zoysh_reload_config() {
     _zoysh_reset_config
     _zoysh_load_config
     _zoysh_validate_config
+    _zoysh_resolve_model
     _zoysh_resolve_key
     (( ${+functions[_zoysh_history_prune]} )) && _zoysh_history_prune
 }
@@ -258,7 +290,19 @@ _zoysh_api_endpoint() {
         openai)
             base="${ZOYSH_BASE_URL:-https://api.openai.com/v1}"
             print -- "${base%/}/responses" ;;
-        *)
+        kimi)
+            base="${ZOYSH_BASE_URL:-https://api.moonshot.ai/v1}"
+            print -- "${base%/}/chat/completions" ;;
+        deepseek)
+            base="${ZOYSH_BASE_URL:-https://api.deepseek.com}"
+            print -- "${base%/}/chat/completions" ;;
+        qwen)
+            base="${ZOYSH_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}"
+            print -- "${base%/}/chat/completions" ;;
+        zai)
+            base="${ZOYSH_BASE_URL:-https://api.z.ai/api/paas/v4}"
+            print -- "${base%/}/chat/completions" ;;
+        local)
             base="${ZOYSH_BASE_URL:-http://127.0.0.1:8001/v1}"
             print -- "${base%/}/chat/completions" ;;
     esac
@@ -267,10 +311,8 @@ _zoysh_api_endpoint() {
 _zoysh_local_base_url() {
     local base="$ZOYSH_BASE_URL"
     if [[ -z "$base" ]]; then
-        case "$ZOYSH_PROVIDER" in
-            anthropic|openai) return 1 ;;
-            *) base="http://127.0.0.1:8001/v1" ;;
-        esac
+        [[ "$ZOYSH_PROVIDER" == "local" ]] || return 1
+        base="http://127.0.0.1:8001/v1"
     fi
 
     case "${base:l}" in
@@ -481,8 +523,8 @@ _zoysh_call_llm() {
     sys_prompt="$(_zoysh_build_system_prompt)"
     endpoint="$(_zoysh_api_endpoint)"
 
-    if [[ ( "$ZOYSH_PROVIDER" == "anthropic" || "$ZOYSH_PROVIDER" == "openai" ) &&
-          ( -z "$ZOYSH_API_KEY" || "$ZOYSH_API_KEY" == "local" ) ]]; then
+    if ! _zoysh_local_base_url >/dev/null &&
+       [[ -z "$ZOYSH_API_KEY" || "$ZOYSH_API_KEY" == "local" ]]; then
         print -r -- "missing API key for provider ${ZOYSH_PROVIDER}"
         return 1
     fi

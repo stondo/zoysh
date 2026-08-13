@@ -1,5 +1,9 @@
 # Zoysh
 
+[![CI](https://github.com/stondo/zoysh/actions/workflows/ci.yml/badge.svg)](https://github.com/stondo/zoysh/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/stondo/zoysh)](https://github.com/stondo/zoysh/releases)
+[![License: GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-blue.svg)](LICENSE)
+
 LLM-powered shell assistant for zsh. Port of [yosh](https://github.com/pizlonator/yosh) (Fil Pizlo's LLM-enabled bash fork) to zsh.
 
 Type `yo <natural language>` at your zsh prompt. Get a command prefilled for review, or an inline answer.
@@ -63,7 +67,7 @@ No zsh framework or compiled extension is required.
 Config file: `~/.yoconf`. It is optional and is re-read before every `yo` command, so edits take effect immediately.
 
 ```conf
-provider qwen
+provider local
 base_url http://127.0.0.1:8001/v1/
 key local
 
@@ -76,10 +80,10 @@ server_web 1
 
 | Directive | Default | Description |
 |-----------|---------|-------------|
-| `provider` | `qwen` | `qwen`, `kimi`, `deepseek`, `anthropic`, `openai`, or `zai` |
+| `provider` | `local` | `local`, `qwen`, `kimi`, `deepseek`, `anthropic`, `openai`, or `zai` |
 | `model` | auto-detected locally | Preferred model ID; local servers are queried through `/models` |
-| `base_url` | `http://127.0.0.1:8001/v1/` | API base URL; omitted Anthropic/OpenAI URLs use their official APIs |
-| `key` | provider key file or `local` | API key |
+| `base_url` | provider-specific | API base URL; omit it to use the selected provider's default below |
+| `key` | provider key file | API key; local endpoints automatically use the placeholder `local` |
 | `history_limit` | `10` | Maximum remembered `yo` exchanges |
 | `token_budget` | `4096` | Approximate token budget for remembered conversation history |
 | `max_output_tokens` | `4096` | Maximum tokens generated for one response |
@@ -92,6 +96,17 @@ server_web 1
 | `enable_bold` / `disable_bold` | ANSI bold toggles | Rendering for Markdown bold |
 | `enable_strikethrough` / `disable_strikethrough` | ANSI strike toggles | Rendering for Markdown strikethrough |
 | `code_delimiter` | muted cyan | Rendering for inline math/code and fenced code blocks |
+
+Hosted providers use yosh's provider defaults unless `model` or `base_url` is set explicitly:
+
+| Provider | Default model | Default endpoint |
+|----------|---------------|------------------|
+| `anthropic` | `claude-sonnet-4-5-20250929` | `https://api.anthropic.com/v1/messages` |
+| `openai` | `gpt-5.2` | `https://api.openai.com/v1/responses` |
+| `kimi` | `kimi-k2.5` | `https://api.moonshot.ai/v1/chat/completions` |
+| `deepseek` | `deepseek-v4-flash` | `https://api.deepseek.com/chat/completions` |
+| `qwen` | `qwen-plus` | `https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions` |
+| `zai` | `glm-5.2` | `https://api.z.ai/api/paas/v4/chat/completions` |
 
 Display values accept optional quotes and C-style escapes such as `\033`, `\n`, `\t`, and `\\`. For example, a plain no-color theme is:
 
@@ -117,7 +132,7 @@ If `~/.yoconf` doesn't exist, zoysh uses the local OpenAI-compatible API at `htt
 For a local server, `model` is optional. Set it when the server exposes multiple models and you want to prefer one:
 
 ```conf
-provider qwen
+provider local
 model qwythos-9b-v2-mtp
 base_url http://127.0.0.1:8001/v1/
 key local
@@ -149,7 +164,6 @@ If no `key` is configured, zoysh checks these single-line files. Set their mode 
 | deepseek | `~/.deepseekkey` |
 | qwen | `~/.qwenkey` |
 | zai | `~/.zaikey` |
-| (fallback) | `~/.yoshkey` |
 
 ## Usage
 

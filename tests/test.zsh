@@ -43,6 +43,8 @@ assert_eq "0.3.0" "$ZOYSH_VERSION" "version is release version"
 assert_eq $'\033[1;36myo\033[0m\n' "$ZOYSH_CHAT_PREFIX" "default chat prefix contains real ANSI escapes"
 assert_eq $'\033[1m' "$ZOYSH_ENABLE_BOLD" "default bold style contains real ANSI escape"
 assert_eq "http://127.0.0.1:8001/v1/chat/completions" "$(_zoysh_api_endpoint)" "local endpoint default"
+assert_eq "local" "$ZOYSH_PROVIDER" "default provider is local"
+assert_eq "" "$ZOYSH_MODEL" "local model starts unset for auto-detection"
 
 FAKE_MODELS_RESPONSE='{"data":[{"id":"detected-model"}]}'
 FAKE_MODELS_STATUS=0
@@ -71,11 +73,30 @@ assert_eq "1" "$prepare_status" "unavailable local server fails"
 assert_eq "no local model server is responding at http://127.0.0.1:8001/v1; start the server and load a model, then try yo again" "$_ZOYSH_BACKEND_ERROR" "unavailable local server gives actionable error"
 unfunction curl
 
-ZOYSH_PROVIDER=openai
-ZOYSH_BASE_URL=""
-assert_eq "https://api.openai.com/v1/responses" "$(_zoysh_api_endpoint)" "OpenAI endpoint default"
-ZOYSH_PROVIDER=anthropic
-assert_eq "https://api.anthropic.com/v1/messages" "$(_zoysh_api_endpoint)" "Anthropic endpoint default"
+assert_provider_defaults() {
+    local provider="$1" endpoint="$2" model="$3"
+    ZOYSH_PROVIDER="$provider"
+    ZOYSH_BASE_URL=""
+    ZOYSH_MODEL=""
+    _ZOYSH_MODEL_EXPLICIT=0
+    _zoysh_resolve_model
+    assert_eq "$endpoint" "$(_zoysh_api_endpoint)" "$provider endpoint default"
+    assert_eq "$model" "$ZOYSH_MODEL" "$provider model default"
+}
+
+assert_provider_defaults anthropic "https://api.anthropic.com/v1/messages" "claude-sonnet-4-5-20250929"
+assert_provider_defaults openai "https://api.openai.com/v1/responses" "gpt-5.2"
+assert_provider_defaults kimi "https://api.moonshot.ai/v1/chat/completions" "kimi-k2.5"
+assert_provider_defaults deepseek "https://api.deepseek.com/chat/completions" "deepseek-v4-flash"
+assert_provider_defaults qwen "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions" "qwen-plus"
+assert_provider_defaults zai "https://api.z.ai/api/paas/v4/chat/completions" "glm-5.2"
+
+ZOYSH_PROVIDER=qwen
+ZOYSH_BASE_URL="http://127.0.0.1:8001/v1"
+ZOYSH_MODEL=""
+_ZOYSH_MODEL_EXPLICIT=0
+_zoysh_resolve_model
+assert_eq "" "$ZOYSH_MODEL" "custom local endpoint leaves model for auto-detection"
 
 ZOYSH_PROVIDER=qwen
 ZOYSH_MODEL=test-model
@@ -165,11 +186,15 @@ api_status=$?
 assert_eq "1" "$api_status" "HTTP errors return failure"
 assert_eq "API request failed (HTTP 429): slow down" "$api_response" "HTTP errors preserve provider message"
 
-ZOYSH_PROVIDER=openai
-ZOYSH_API_KEY=local
-api_response="$(_zoysh_call_llm "fixture request")"
-api_status=$?
-assert_eq "1" "$api_status" "hosted providers reject placeholder keys"
+for hosted_provider in anthropic openai kimi deepseek qwen zai; do
+    ZOYSH_PROVIDER="$hosted_provider"
+    ZOYSH_BASE_URL=""
+    ZOYSH_API_KEY=local
+    api_response="$(_zoysh_call_llm "fixture request")"
+    api_status=$?
+    assert_eq "1" "$api_status" "$hosted_provider rejects placeholder key"
+    assert_eq "missing API key for provider ${hosted_provider}" "$api_response" "$hosted_provider reports missing key"
+done
 unfunction curl
 
 tmp_config="$(mktemp "${TMPDIR:-/tmp}/zoysh-test.XXXXXX")" || exit 1

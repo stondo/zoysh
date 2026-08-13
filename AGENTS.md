@@ -71,7 +71,7 @@ The source to port lives at `readline-8.2.13/yo.c` in the yosh repo (5553 LOC). 
 
 `~/.yoconf` (all portable yosh directives; PTY scrollback remains Phase 2):
 ```
-provider qwen
+provider local
 model qwythos-9b-v2-mtp
 base_url http://127.0.0.1:8001/v1/
 key local
