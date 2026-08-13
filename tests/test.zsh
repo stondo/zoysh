@@ -86,10 +86,15 @@ assert_provider_defaults() {
 
 assert_provider_defaults anthropic "https://api.anthropic.com/v1/messages" "claude-sonnet-4-5-20250929"
 assert_provider_defaults openai "https://api.openai.com/v1/responses" "gpt-5.2"
+assert_provider_defaults openrouter "https://openrouter.ai/api/v1/chat/completions" "z-ai/glm-5.2"
 assert_provider_defaults kimi "https://api.moonshot.ai/v1/chat/completions" "kimi-k2.5"
 assert_provider_defaults deepseek "https://api.deepseek.com/chat/completions" "deepseek-v4-flash"
 assert_provider_defaults qwen "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions" "qwen-plus"
 assert_provider_defaults zai "https://api.z.ai/api/paas/v4/chat/completions" "glm-5.2"
+
+ZOYSH_PROVIDER=openrouter
+_zoysh_validate_config 2>/dev/null
+assert_eq "openrouter" "$ZOYSH_PROVIDER" "config accepts OpenRouter provider"
 
 ZOYSH_PROVIDER=qwen
 ZOYSH_BASE_URL="http://127.0.0.1:8001/v1"
@@ -186,7 +191,7 @@ api_status=$?
 assert_eq "1" "$api_status" "HTTP errors return failure"
 assert_eq "API request failed (HTTP 429): slow down" "$api_response" "HTTP errors preserve provider message"
 
-for hosted_provider in anthropic openai kimi deepseek qwen zai; do
+for hosted_provider in anthropic openai openrouter kimi deepseek qwen zai; do
     ZOYSH_PROVIDER="$hosted_provider"
     ZOYSH_BASE_URL=""
     ZOYSH_API_KEY=local
@@ -200,7 +205,7 @@ unfunction curl
 tmp_config="$(mktemp "${TMPDIR:-/tmp}/zoysh-test.XXXXXX")" || exit 1
 tmp_home="$(mktemp -d "${TMPDIR:-/tmp}/zoysh-home.XXXXXX")" || exit 1
 tmp_stderr="$tmp_home/stderr"
-trap 'rm -f -- "$tmp_config" "$tmp_home/.qwenkey" "$tmp_stderr"; rmdir -- "$tmp_home" 2>/dev/null' EXIT
+trap 'rm -f -- "$tmp_config" "$tmp_home/.qwenkey" "$tmp_home/.openrouterkey" "$tmp_stderr"; rmdir -- "$tmp_home" 2>/dev/null' EXIT
 printf '%s\n' \
     $'provider\tOPENAI' \
     'model release-model # comment' \
@@ -276,12 +281,25 @@ ZOYSH_API_KEY=""
 _zoysh_resolve_key
 assert_eq "file-key" "$ZOYSH_API_KEY" "missing key loads provider key file"
 
+printf '%s\n' 'openrouter-file-key' > "$tmp_home/.openrouterkey"
+ZOYSH_PROVIDER=openrouter
+ZOYSH_API_KEY=""
+_zoysh_resolve_key
+assert_eq "openrouter-file-key" "$ZOYSH_API_KEY" "OpenRouter loads its provider key file"
+
 ZAI_API_KEY="env-key"
 ZOYSH_PROVIDER=zai
 ZOYSH_API_KEY=""
 _zoysh_resolve_key
 assert_eq "env-key" "$ZOYSH_API_KEY" "z.ai loads its conventional environment key"
 unset ZAI_API_KEY
+
+OPENROUTER_API_KEY="env-key"
+ZOYSH_PROVIDER=openrouter
+ZOYSH_API_KEY=""
+_zoysh_resolve_key
+assert_eq "env-key" "$ZOYSH_API_KEY" "OpenRouter loads its conventional environment key"
+unset OPENROUTER_API_KEY
 
 _zoysh_call_llm() {
     print -r -- '{"choices":[{"message":{"content":"{\"type\":\"chat\",\"response\":\"quiet response\"}"}}]}'

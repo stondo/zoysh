@@ -80,7 +80,7 @@ server_web 1
 
 | Directive | Default | Description |
 |-----------|---------|-------------|
-| `provider` | `local` | `local`, `qwen`, `kimi`, `deepseek`, `anthropic`, `openai`, or `zai` |
+| `provider` | `local` | `local`, `qwen`, `kimi`, `deepseek`, `anthropic`, `openai`, `openrouter`, or `zai` |
 | `model` | auto-detected locally | Preferred model ID; local servers are queried through `/models` |
 | `base_url` | provider-specific | API base URL; omit it to use the selected provider's default below |
 | `key` | provider key file | API key; local endpoints automatically use the placeholder `local` |
@@ -103,6 +103,7 @@ Hosted providers use yosh's provider defaults unless `model` or `base_url` is se
 |----------|---------------|------------------|
 | `anthropic` | `claude-sonnet-4-5-20250929` | `https://api.anthropic.com/v1/messages` |
 | `openai` | `gpt-5.2` | `https://api.openai.com/v1/responses` |
+| `openrouter` | `z-ai/glm-5.2` | `https://openrouter.ai/api/v1/chat/completions` |
 | `kimi` | `kimi-k2.5` | `https://api.moonshot.ai/v1/chat/completions` |
 | `deepseek` | `deepseek-v4-flash` | `https://api.deepseek.com/chat/completions` |
 | `qwen` | `qwen-plus` | `https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions` |
@@ -154,14 +155,16 @@ ZOYSH_CONF=/dev/null ZOYSH_MODEL=another-model zsh
 
 ### API keys
 
-Keys are resolved in this order: the `key` directive, `ZOYSH_API_KEY`, z.ai's
-standard `ZAI_API_KEY`, then the provider's single-line key file. Set key-file
-permissions to `0600`.
+Keys are resolved in this order: the `key` directive, `ZOYSH_API_KEY`, the
+provider's standard environment variable (`ZAI_API_KEY` or
+`OPENROUTER_API_KEY`), then its single-line key file. Set key-file permissions
+to `0600`.
 
 | Provider | Key file |
 |----------|----------|
 | anthropic | `~/.anthropickey` |
 | openai | `~/.openaikey` |
+| openrouter | `~/.openrouterkey` |
 | kimi | `~/.kimikey` |
 | deepseek | `~/.deepseekkey` |
 | qwen | `~/.qwenkey` |
@@ -182,7 +185,7 @@ permissions to `0600`.
 - **Command generation** — natural language to zsh command, prefilled for review
 - **Inline Q&A** — ask questions without leaving the terminal
 - **Session memory** — remembers conversation context within a session
-- **Multi-provider** — Anthropic, OpenAI, Kimi, DeepSeek, Qwen, z.ai, local models
+- **Multi-provider** — Anthropic, OpenAI, OpenRouter, Kimi, DeepSeek, Qwen, z.ai, local models
 - **Shell-aware** — includes OS, zsh version, working directory, and git branch in context
 - **Thinking-aware** — strips `<think>` blocks from local reasoning models
 - **Terminal Markdown** — renders headings, emphasis, lists, quotes, inline math/code, and fenced code

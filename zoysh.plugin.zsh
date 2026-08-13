@@ -188,7 +188,7 @@ _zoysh_load_config() {
 
 _zoysh_validate_config() {
     case "$ZOYSH_PROVIDER" in
-        local|anthropic|openai|kimi|deepseek|qwen|zai) ;;
+        local|anthropic|openai|openrouter|kimi|deepseek|qwen|zai) ;;
         *)
             printf 'zoysh: unsupported provider %s; using local\n' "$ZOYSH_PROVIDER" >&2
             ZOYSH_PROVIDER=local
@@ -243,6 +243,7 @@ _zoysh_resolve_model() {
     case "$ZOYSH_PROVIDER" in
         anthropic) ZOYSH_MODEL="claude-sonnet-4-5-20250929" ;;
         openai)    ZOYSH_MODEL="gpt-5.2" ;;
+        openrouter) ZOYSH_MODEL="z-ai/glm-5.2" ;;
         kimi)      ZOYSH_MODEL="kimi-k2.5" ;;
         deepseek)  ZOYSH_MODEL="deepseek-v4-flash" ;;
         qwen)      ZOYSH_MODEL="qwen-plus" ;;
@@ -264,11 +265,16 @@ _zoysh_resolve_key() {
         ZOYSH_API_KEY="$ZAI_API_KEY"
         return 0
     fi
+    if [[ "$ZOYSH_PROVIDER" == "openrouter" && -n "${OPENROUTER_API_KEY:-}" ]]; then
+        ZOYSH_API_KEY="$OPENROUTER_API_KEY"
+        return 0
+    fi
 
     local keyfile
     case "$ZOYSH_PROVIDER" in
         anthropic) keyfile="$HOME/.anthropickey" ;;
         openai)    keyfile="$HOME/.openaikey" ;;
+        openrouter) keyfile="$HOME/.openrouterkey" ;;
         kimi)      keyfile="$HOME/.kimikey" ;;
         deepseek)  keyfile="$HOME/.deepseekkey" ;;
         qwen)      keyfile="$HOME/.qwenkey" ;;
@@ -298,6 +304,9 @@ _zoysh_api_endpoint() {
         openai)
             base="${ZOYSH_BASE_URL:-https://api.openai.com/v1}"
             print -- "${base%/}/responses" ;;
+        openrouter)
+            base="${ZOYSH_BASE_URL:-https://openrouter.ai/api/v1}"
+            print -- "${base%/}/chat/completions" ;;
         kimi)
             base="${ZOYSH_BASE_URL:-https://api.moonshot.ai/v1}"
             print -- "${base%/}/chat/completions" ;;
