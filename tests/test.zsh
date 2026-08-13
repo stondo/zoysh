@@ -41,6 +41,33 @@ parse_reply() {
 assert_eq "0.3.0" "$ZOYSH_VERSION" "version is release version"
 assert_eq "http://127.0.0.1:8001/v1/chat/completions" "$(_zoysh_api_endpoint)" "local endpoint default"
 
+FAKE_MODELS_RESPONSE='{"data":[{"id":"detected-model"}]}'
+FAKE_MODELS_STATUS=0
+curl() {
+    printf '%s' "$FAKE_MODELS_RESPONSE"
+    return "$FAKE_MODELS_STATUS"
+}
+ZOYSH_PROVIDER=qwen
+ZOYSH_BASE_URL="http://127.0.0.1:8001/v1/"
+ZOYSH_MODEL=stale-model
+_zoysh_prepare_backend
+prepare_status=$?
+assert_eq "0" "$prepare_status" "local model detection succeeds"
+assert_eq "detected-model" "$ZOYSH_MODEL" "local model detection updates runtime model"
+
+FAKE_MODELS_RESPONSE='{"data":[]}'
+_zoysh_prepare_backend
+prepare_status=$?
+assert_eq "1" "$prepare_status" "empty local model list fails"
+assert_eq "no local model is loaded at http://127.0.0.1:8001/v1; load a model, then try yo again" "$_ZOYSH_BACKEND_ERROR" "empty local model list gives actionable error"
+
+FAKE_MODELS_STATUS=7
+_zoysh_prepare_backend
+prepare_status=$?
+assert_eq "1" "$prepare_status" "unavailable local server fails"
+assert_eq "no local model server is responding at http://127.0.0.1:8001/v1; start the server and load a model, then try yo again" "$_ZOYSH_BACKEND_ERROR" "unavailable local server gives actionable error"
+unfunction curl
+
 ZOYSH_PROVIDER=openai
 ZOYSH_BASE_URL=""
 assert_eq "https://api.openai.com/v1/responses" "$(_zoysh_api_endpoint)" "OpenAI endpoint default"
@@ -115,7 +142,8 @@ unfunction curl
 
 tmp_config="$(mktemp "${TMPDIR:-/tmp}/zoysh-test.XXXXXX")" || exit 1
 tmp_home="$(mktemp -d "${TMPDIR:-/tmp}/zoysh-home.XXXXXX")" || exit 1
-trap 'rm -f -- "$tmp_config" "$tmp_home/.qwenkey"; rmdir -- "$tmp_home" 2>/dev/null' EXIT
+tmp_stderr="$tmp_home/stderr"
+trap 'rm -f -- "$tmp_config" "$tmp_home/.qwenkey" "$tmp_stderr"; rmdir -- "$tmp_home" 2>/dev/null' EXIT
 printf '%s\n' \
     $'provider\tOPENAI' \
     'model release-model # comment' \
@@ -141,6 +169,15 @@ assert_eq "local" "$ZOYSH_API_KEY" "explicit local key bypasses key files"
 ZOYSH_API_KEY=""
 _zoysh_resolve_key
 assert_eq "file-key" "$ZOYSH_API_KEY" "missing key loads provider key file"
+
+_zoysh_call_llm() {
+    print -r -- '{"choices":[{"message":{"content":"{\"type\":\"chat\",\"response\":\"quiet response\"}"}}]}'
+}
+_zoysh_prepare_backend() { return 0 }
+yo -c "fixture request" >/dev/null 2>"$tmp_stderr"
+stderr_output=""
+IFS= read -r stderr_output < "$tmp_stderr" || true
+assert_eq "" "$stderr_output" "requests do not create spinner job output"
 
 print -r -- "1..${TESTS_RUN}"
 if (( TESTS_FAILED )); then

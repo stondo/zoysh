@@ -60,6 +60,7 @@ typeset -g ZOYSH_PROVIDER="${ZOYSH_PROVIDER:-qwen}"
 typeset -g ZOYSH_MODEL="${ZOYSH_MODEL:-qwythos-9b-v2-mtp}"
 typeset -g ZOYSH_BASE_URL="${ZOYSH_BASE_URL:-}"
 typeset -g ZOYSH_API_KEY="${ZOYSH_API_KEY:-}"
+typeset -g _ZOYSH_BACKEND_ERROR=""
 
 _zoysh_load_config() {
     [[ -f "$ZOYSH_CONF" ]] || return 0
@@ -131,6 +132,70 @@ _zoysh_api_endpoint() {
             base="${ZOYSH_BASE_URL:-http://127.0.0.1:8001/v1}"
             print -- "${base%/}/chat/completions" ;;
     esac
+}
+
+_zoysh_local_base_url() {
+    local base="$ZOYSH_BASE_URL"
+    if [[ -z "$base" ]]; then
+        case "$ZOYSH_PROVIDER" in
+            anthropic|openai) return 1 ;;
+            *) base="http://127.0.0.1:8001/v1" ;;
+        esac
+    fi
+
+    case "${base:l}" in
+        http://localhost|http://localhost/*|http://localhost:*|\
+        https://localhost|https://localhost/*|https://localhost:*|\
+        http://127.0.0.1|http://127.0.0.1/*|http://127.0.0.1:*|\
+        https://127.0.0.1|https://127.0.0.1/*|https://127.0.0.1:*|\
+        'http://[::1]'|'http://[::1]/'*|'http://[::1]:'*|\
+        'https://[::1]'|'https://[::1]/'*|'https://[::1]:'*)
+            print -r -- "${base%/}"
+            return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+_zoysh_prepare_backend() {
+    _ZOYSH_BACKEND_ERROR=""
+
+    local base models_endpoint response detected
+    base="$(_zoysh_local_base_url)" || return 0
+    models_endpoint="${base}/models"
+
+    response=$(curl -fsS --connect-timeout 2 --max-time 5 \
+        --user-agent "zoysh/${ZOYSH_VERSION}" \
+        -H "Accept: application/json" "$models_endpoint" 2>/dev/null) || {
+        _ZOYSH_BACKEND_ERROR="no local model server is responding at ${base}; start the server and load a model, then try yo again"
+        return 1
+    }
+
+    detected=$(printf '%s' "$response" | ZMOD="$ZOYSH_MODEL" python3 -c '
+import json, os, sys
+
+try:
+    payload = json.load(sys.stdin)
+    models = payload.get("data", [])
+    ids = [item.get("id") for item in models if isinstance(item, dict) and isinstance(item.get("id"), str) and item.get("id")]
+except (AttributeError, TypeError, ValueError):
+    raise SystemExit(2)
+
+current = os.environ.get("ZMOD", "")
+if ids:
+    print(current if current in ids else ids[0])
+')
+    local parse_status=$?
+
+    if (( parse_status != 0 )); then
+        _ZOYSH_BACKEND_ERROR="the local server at ${base} returned an invalid /models response; verify that it provides an OpenAI-compatible API"
+        return 1
+    fi
+    if [[ -z "$detected" ]]; then
+        _ZOYSH_BACKEND_ERROR="no local model is loaded at ${base}; load a model, then try yo again"
+        return 1
+    fi
+
+    ZOYSH_MODEL="$detected"
 }
 
 _zoysh_build_system_prompt() {
@@ -416,27 +481,6 @@ _zoysh_print_chat()   { printf '\n\033[3;36m%s\033[0m\n\n' "$1" }
 _zoysh_print_error()  { printf '\n\033[31mzoysh: %s\033[0m\n\n' "$1" }
 _zoysh_print_command() { [[ -n "$2" ]] && printf '\033[90m%s\033[0m\n' "$2" }
 
-_zoysh_thinking_animation() {
-    [[ -t 2 ]] || return 0
-    {
-        local frames="⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏" i=0
-        while true; do
-            printf '\r\033[3;36myo\033[0m \033[90m%s thinking...\033[0m' "${frames:$((i % 10)):1}" >&2
-            ((i++)); sleep 0.08
-        done
-    } &
-    ZOYSH_SPINNER_PID=$!
-}
-
-_zoysh_stop_spinner() {
-    [[ -n "${ZOYSH_SPINNER_PID:-}" ]] && {
-        kill "$ZOYSH_SPINNER_PID" 2>/dev/null
-        wait "$ZOYSH_SPINNER_PID" 2>/dev/null
-        unset ZOYSH_SPINNER_PID
-        printf '\r\033[K' >&2
-    }
-}
-
 # ─── yo Command ──────────────────────────────────────────────────────────────
 
 yo() {
@@ -452,8 +496,17 @@ yo() {
                 printf '  yo --clear               Clear session memory\n'
                 printf '  yo --version             Show version\n'
                 printf '  yo --help                Show this help\n\n'
-                printf 'Config: %s\n' "$ZOYSH_CONF"
-                printf 'Backend: %s/%s @ %s\n' "$ZOYSH_PROVIDER" "$ZOYSH_MODEL" "$(_zoysh_api_endpoint)"
+                if [[ -f "$ZOYSH_CONF" ]]; then
+                    printf 'Config: %s\n' "$ZOYSH_CONF"
+                else
+                    printf 'Config: %s (not found; using environment/defaults)\n' "$ZOYSH_CONF"
+                fi
+                if _zoysh_prepare_backend; then
+                    printf 'Backend: %s/%s @ %s\n' "$ZOYSH_PROVIDER" "$ZOYSH_MODEL" "$(_zoysh_api_endpoint)"
+                else
+                    printf 'Backend: unavailable @ %s\n' "$(_zoysh_api_endpoint)"
+                    printf 'Status: %s\n' "$_ZOYSH_BACKEND_ERROR"
+                fi
                 return 0 ;;
             --clear) _zoysh_history_clear; return 0 ;;
             --version) printf 'zoysh %s\n' "$ZOYSH_VERSION"; return 0 ;;
@@ -468,14 +521,14 @@ yo() {
 
     (( chat_mode )) && query="Answer this (do NOT generate a command): $query"
 
-    _zoysh_thinking_animation
+    if ! _zoysh_prepare_backend; then
+        _zoysh_print_error "$_ZOYSH_BACKEND_ERROR"
+        return 1
+    fi
+
     local response call_status
-    {
-        response=$(_zoysh_call_llm "$query")
-        call_status=$?
-    } always {
-        _zoysh_stop_spinner
-    }
+    response=$(_zoysh_call_llm "$query")
+    call_status=$?
 
     if (( call_status != 0 )) || [[ -z "$response" ]]; then
         _zoysh_print_error "${response:-API call failed}"

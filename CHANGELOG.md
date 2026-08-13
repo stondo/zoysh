@@ -4,6 +4,12 @@ All notable changes to Zoysh are documented here. The project follows [Semantic 
 
 ## [Unreleased]
 
+### Changed
+
+- Removed the background thinking spinner so interactive zsh does not print job start and termination notices around every request.
+- Automatically detect models served by local OpenAI-compatible backends before each request and explain how to recover when the server is unavailable or has no model loaded.
+- Clarified missing-config status in `yo --help`; `~/.yoconf` remains optional.
+
 ## [0.3.0] - 2026-08-13
 
 ### Added

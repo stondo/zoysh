@@ -83,8 +83,33 @@ token_budget 4096
 timeout 30
 ```
 
-If `~/.yoconf` doesn't exist, defaults to local model at `http://127.0.0.1:8001/v1/`.
+If `~/.yoconf` doesn't exist, zoysh defaults to the local OpenAI-compatible API at `http://127.0.0.1:8001/v1/`. Before each request it reads `/models`, uses the configured model when it is loaded, or automatically selects the first model reported by the server. If the server is unavailable or reports no loaded models, `yo` stops with instructions to start the server and load one.
 For `anthropic` and `openai`, omitting `base_url` selects the provider's official API endpoint.
+
+### Changing the model
+
+For a local server, `model` is optional because zoysh detects the loaded model automatically. Set it when the server exposes multiple models and you want to prefer a specific one:
+
+```conf
+provider qwen
+model qwythos-9b-v2-mtp
+base_url http://127.0.0.1:8001/v1/
+key local
+```
+
+For an OpenAI-compatible local server, list its available model IDs with:
+
+```sh
+curl -s http://127.0.0.1:8001/v1/models | python3 -m json.tool
+```
+
+Zoysh reads `~/.yoconf` when the plugin loads. After changing it, start a new shell with `exec zsh`, then verify the selected backend with `yo --help`. `yo --help` and normal requests refresh local model detection in the running shell; they do not rewrite `~/.yoconf`.
+
+You can also ignore the config file and override the model for one new zsh process:
+
+```sh
+ZOYSH_CONF=/dev/null ZOYSH_MODEL=another-model zsh
+```
 
 ### API key files
 
@@ -128,9 +153,9 @@ The query, current directory, operating system, zsh version, git branch, and bou
 
 Generated commands are untrusted model output. Zoysh only prefills the prompt; review every command before pressing Enter, especially commands that modify files, permissions, packages, or remote systems.
 
-## Roadmap
+## Release status and roadmap
 
-### Phase 1: Script Plugin (current)
+### Phase 1: Script plugin (v0.3.0)
 - [x] `yo` command via zsh function
 - [x] Command prefilling via `print -z`
 - [x] Session memory
@@ -139,10 +164,18 @@ Generated commands are untrusted model output. Zoysh only prefills the prompt; r
 - [x] Python JSON request/response handling
 - [x] Plugin manager compatibility (zinit, antidote, zplug, oh-my-zsh)
 - [x] CI testing
+
+The following are future Phase 1 enhancements, not missing v0.3.0 release requirements:
+
 - [ ] Session history with scrollback context
 - [ ] Streaming responses
 
-### Phase 2: C Loadable Module
+Session memory currently includes earlier `yo` queries and responses only; it does not capture arbitrary terminal output.
+
+### Phase 2: C loadable module (planned)
+
+Phase 2 is experimental and is not part of the script-plugin release. The repository currently contains module boilerplate only.
+
 - [ ] Port `yo.c` core (LLM API logic) from yosh
 - [ ] ZLE widget registration
 - [ ] PTY proxy for scrollback capture
