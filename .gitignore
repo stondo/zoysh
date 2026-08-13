@@ -1,0 +1,24 @@
+# Build artifacts
+*.o
+*.so
+*.mdh
+*.pro
+*.mdhi
+src/*.mdh
+src/*.pro
+
+# cJSON (fetched from yosh/upstream, not committed yet)
+src/cJSON.c
+src/cJSON.h
+
+# Editor/IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Tags
+tags
+TAGS

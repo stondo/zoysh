@@ -1,0 +1,13 @@
+                    GNU GENERAL PUBLIC LICENSE
+                       Version 3, 29 June 2007
+
+ Copyright (C) 2007 Free Software Foundation, Inc. <https://fsf.org/>
+ Everyone is permitted to copy and distribute verbatim copies
+ of this license document, but changing it is not allowed.
+
+Zoysh is based on yosh (github.com/pizlonator/yosh), which is itself based
+on GNU Bash and GNU Readline, all licensed under GPLv3.
+
+cJSON (src/cJSON.c, src/cJSON.h) is licensed under the MIT License.
+
+See LICENSE.GPL for the full GPLv3 text.
