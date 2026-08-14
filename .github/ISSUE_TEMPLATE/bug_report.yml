@@ -42,6 +42,7 @@ body:
         - local
         - anthropic
         - openai
+        - openrouter
         - kimi
         - deepseek
         - qwen

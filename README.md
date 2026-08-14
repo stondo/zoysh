@@ -4,7 +4,11 @@
 [![Release](https://img.shields.io/github/v/release/stondo/zoysh)](https://github.com/stondo/zoysh/releases)
 [![License: GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-blue.svg)](LICENSE)
 
-LLM-powered shell assistant for zsh. Port of [yosh](https://github.com/pizlonator/yosh) (Fil Pizlo's LLM-enabled bash fork) to zsh.
+LLM-powered shell assistant for zsh. Zoysh is a zsh port and adaptation of
+[Yosh](https://github.com/pizlonator/yosh), created by
+[Fil Pizlo](https://github.com/pizlonator). It brings Yosh's `yo` interaction,
+configuration conventions, provider behavior, and session model to zsh without
+requiring a custom Bash build.
 
 Type `yo <natural language>` at your zsh prompt. Get a command prefilled for review, or an inline answer.
 
@@ -97,7 +101,9 @@ server_web 1
 | `enable_strikethrough` / `disable_strikethrough` | ANSI strike toggles | Rendering for Markdown strikethrough |
 | `code_delimiter` | muted cyan | Rendering for inline math/code and fenced code blocks |
 
-Hosted providers use yosh's provider defaults unless `model` or `base_url` is set explicitly:
+Where Yosh defines a hosted-provider default, Zoysh tracks it. Zoysh also adds
+OpenRouter and local OpenAI-compatible backends. Set `model` or `base_url` to
+override any default:
 
 | Provider | Default model | Default endpoint |
 |----------|---------------|------------------|
@@ -268,9 +274,17 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow and [SECURI
 
 ## Credits
 
-- **Original concept and LLM logic**: [Fil Pizlo](https://github.com/pizlonator) — [yosh](https://github.com/pizlonator/yosh)
-- **zsh port**: [Stefano Tondo](https://github.com/stondo)
+Zoysh exists because of [Yosh](https://github.com/pizlonator/yosh). Please visit
+and support the original project.
+
+- **Yosh author; original design and implementation**: [Fil Pizlo](https://github.com/pizlonator)
+- **Yosh `yo.c` copyright holder**: Epic Games, Inc.
+- **Zoysh port and modifications**: [Stefano Tondo](https://github.com/stondo)
+
+Zoysh is an independent port and is not affiliated with or endorsed by Fil
+Pizlo or Epic Games, Inc. Detailed provenance is recorded in [NOTICE](NOTICE).
 
 ## License
 
-GPL-3.0-only. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Zoysh is licensed under GPL-3.0-only. See [LICENSE](LICENSE) and
+[NOTICE](NOTICE) for upstream provenance and copyright notices.

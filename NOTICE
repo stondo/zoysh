@@ -3,6 +3,27 @@ Copyright (C) 2026 Stefano Tondo
 
 Zoysh is distributed under the GNU General Public License, version 3 only.
 
-The project is a zsh port inspired by yosh by Fil Pizlo. The experimental Phase 2
-module may later incorporate code derived from yosh, GNU Bash, GNU Readline, and
-cJSON; retain the applicable upstream copyright and license notices when doing so.
+Upstream provenance
+-------------------
+
+Zoysh is a zsh port and adaptation of Yosh, created by Fil Pizlo:
+
+    https://github.com/pizlonator/yosh
+
+The original Yosh project introduced the `yo` interaction and the LLM provider,
+configuration, session-memory, terminal-awareness, and multi-step designs that
+Zoysh adapts for zsh. Yosh's `readline-8.2.13/yo.c` carries this notice:
+
+    Copyright (C) 2026 Epic Games, Inc.
+
+That upstream file is offered under the GNU General Public License, version 3 or
+later. Zoysh's zsh-specific implementation and modifications are Copyright (C)
+2026 Stefano Tondo and are distributed under GPL-3.0-only.
+
+The current script-plugin release does not bundle GNU Bash, GNU Readline, or
+cJSON. The experimental native-module directory contains zsh module boilerplate;
+if future work imports upstream source, contributors must retain the applicable
+copyright and license notices.
+
+Zoysh is an independent project and is not affiliated with or endorsed by Fil
+Pizlo or Epic Games, Inc.

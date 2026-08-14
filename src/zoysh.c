@@ -5,7 +5,9 @@
  * zoysh.mdh — zsh module definition header
  *
  * Declares the zoysh zsh module for LLM-powered shell assistance.
- * Port of yosh (github.com/pizlonator/yosh) readline integration to zsh ZLE.
+ * Port and adaptation of Yosh by Fil Pizlo to zsh ZLE:
+ * https://github.com/pizlonator/yosh
+ * Yosh readline-8.2.13/yo.c is Copyright (C) 2026 Epic Games, Inc.
  */
 
 #include "zsh.mdh"

@@ -311,6 +311,10 @@ stderr_output=""
 IFS= read -r stderr_output < "$tmp_stderr" || true
 assert_eq "" "$stderr_output" "requests do not create spinner job output"
 
+help_output="$(yo --help)"
+[[ "$help_output" == *"A zsh port of Yosh by Fil Pizlo"* ]] && help_credits=1 || help_credits=0
+assert_eq "1" "$help_credits" "help credits Yosh and Fil Pizlo"
+
 print -r -- "1..${TESTS_RUN}"
 if (( TESTS_FAILED )); then
     print -u2 -r -- "${TESTS_FAILED} test(s) failed"

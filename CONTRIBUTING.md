@@ -18,6 +18,7 @@ The Phase 1 release is the pure-zsh plugin. Keep changes dependency-light and co
 - Do not put live API keys or network-dependent provider calls in tests.
 - Run `make check` and `git diff --check` before submitting.
 - Update `README.md` and `CHANGELOG.md` when user-visible behavior changes.
+- Preserve Yosh, Fil Pizlo, Epic Games, and other applicable upstream notices in derived work; update `NOTICE` when adding upstream code.
 - Keep commits focused and explain compatibility or security tradeoffs in the pull request.
 
 By contributing, you agree that your contribution is licensed under GPL-3.0-only.

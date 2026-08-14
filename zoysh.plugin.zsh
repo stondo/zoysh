@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 Stefano Tondo
 # zoysh.plugin.zsh — LLM-powered shell assistant for zsh
-# Port of yosh (github.com/pizlonator/yosh) to zsh
+# Port and adaptation of Yosh by Fil Pizlo:
+# https://github.com/pizlonator/yosh
+# Yosh readline-8.2.13/yo.c is Copyright (C) 2026 Epic Games, Inc.
 #
 # Install (plugin managers):
 #   zinit:   zinit light stondo/zoysh
@@ -802,6 +804,7 @@ yo() {
             -c|--chat)  chat_mode=1; shift ;;
             -h|--help)
                 printf 'zoysh v%s — LLM-powered shell assistant\n\n' "$ZOYSH_VERSION"
+                printf 'A zsh port of Yosh by Fil Pizlo: https://github.com/pizlonator/yosh\n\n'
                 printf 'Usage:\n'
                 printf '  yo <natural language>    Generate a shell command\n'
                 printf '  yo -c <question>         Ask a question inline\n'

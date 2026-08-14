@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**Zoysh** is a port of [yosh](https://github.com/pizlonator/yosh) (LLM-enabled bash fork) to zsh. It provides `yo <natural language>` → shell command generation at the zsh prompt.
+**Zoysh** is a port and adaptation of [Yosh](https://github.com/pizlonator/yosh), created by Fil Pizlo, from Bash/Readline to zsh. It provides `yo <natural language>` → shell command generation at the zsh prompt. Yosh's `readline-8.2.13/yo.c` is Copyright (C) 2026 Epic Games, Inc.; preserve upstream notices in derived work.
 
 ## Architecture
 
@@ -20,7 +20,7 @@
   - PTY proxy for scrollback capture
   - Self-pipe Ctrl-C cancellation
   - Multi-step continuation
-- `src/cJSON.c` — JSON parser (MIT, from yosh/upstream)
+- `src/cJSON.c` (planned, not currently present) — JSON parser (MIT, from yosh/upstream)
 
 ### Key differences from yosh
 
@@ -98,5 +98,6 @@ zsh -f -i -c 'source zoysh.plugin.zsh; yo list all python files'
 - Compatible with yosh's portable `~/.yoconf` directives; PTY scrollback settings are recognized but unavailable in Phase 1
 - Default provider: local model (`http://127.0.0.1:8001/v1/`)
 - No external zsh framework dependencies (no oh-my-zsh, no zinit required)
-- GPL-3.0 license (inherited from yosh/bash/readline)
-- cJSON is MIT licensed
+- GPL-3.0-only license, selected for compatibility with Yosh's GPL-3.0-or-later source
+- The current release does not bundle Bash, Readline, or cJSON
+- cJSON is MIT licensed if it is added to the planned native module

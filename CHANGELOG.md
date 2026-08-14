@@ -9,6 +9,11 @@ All notable changes to Zoysh are documented here. The project follows [Semantic 
 - Accept z.ai's standard `ZAI_API_KEY` environment variable as a credential source.
 - Add OpenRouter support with `OPENROUTER_API_KEY` and `z-ai/glm-5.2` defaults.
 
+### Changed
+
+- Strengthen Yosh attribution and upstream copyright provenance throughout the project.
+- Refresh contributor, release, and issue documentation for the current provider set.
+
 ## [0.3.0] - 2026-08-14
 
 ### Added
