@@ -262,6 +262,11 @@ Run all release checks:
 make check
 ```
 
+The suite includes end-to-end tests against `tests/stub_server.py`, a
+stdlib-only OpenAI-compatible stub that serves `/v1/models` and streaming or
+non-streaming completions with canned scripts. No model backend is needed in
+CI.
+
 Install the script plugin under `PREFIX` (defaults to `~/.local`):
 
 ```sh
