@@ -542,6 +542,46 @@ zpty -d zcancel2
 zoysh_stub_stop
 ZOYSH_CONF=/dev/null
 
+# ── ZLE widget tests ─────────────────────────────────────────────────────────
+
+zoysh_stub_start widget
+printf 'provider local\nbase_url http://127.0.0.1:%s/v1\nkey local\n' "$ZOYSH_STUB_PORT" > "$tmp_config"
+zpty -b zwidget "env ZOYSH_CONF=$tmp_config HOME=$HOME PS1='ZW> ' zsh -f -i"
+zpty -w zwidget "stty rows 30 cols 100; source ${TEST_ROOT}/zoysh.plugin.zsh; print WREG=\$(( \${+widgets[zoysh-widget]} )) BOUND=\$(bindkey '\\ey') SYNC\$(( 6*7 ))"$'\r'
+zoysh_zpty_wait zwidget "SYNC42" 10
+assert_eq "1" "$ZPTY_WAITED" "the widget registration probe completed"
+[[ "${REPLY}" == *"WREG=1"* ]] && wreg=1 || wreg=0
+assert_eq "1" "$wreg" "the zoysh widget is registered"
+[[ "${REPLY}" == *"zoysh-widget"* ]] && wbound=1 || wbound=0
+assert_eq "1" "$wbound" "M-y is bound to the zoysh widget by default"
+
+zpty -w -n zwidget "print a marker"
+sleep 0.4
+zpty -w -n zwidget $'\033y'
+zoysh_zpty_wait zwidget "echo ZOYSH_WIDGET_OK" 15
+assert_eq "1" "$ZPTY_WAITED" "M-y over a typed buffer replaces it with the generated command"
+zpty -w -n zwidget $'\r'
+zoysh_zpty_wait zwidget "ZOYSH_WIDGET_OK" 10
+assert_eq "1" "$ZPTY_WAITED" "the generated widget command runs after Enter"
+
+zpty -w -n zwidget $'\033y'
+zoysh_zpty_wait zwidget "query:" 10
+assert_eq "1" "$ZPTY_WAITED" "M-y on an empty buffer opens the mini-prompt"
+zpty -w -n zwidget "run the marker"
+sleep 0.3
+zpty -w -n zwidget $'\r'
+zoysh_zpty_wait zwidget "echo ZOYSH_WIDGET_OK" 15
+assert_eq "1" "$ZPTY_WAITED" "a mini-prompt query generates the command into the buffer"
+zpty -d zwidget
+zoysh_stub_stop
+
+zpty -b zoptout "env ZOYSH_CONF=/dev/null HOME=$HOME PS1='ZO> ' zsh -f -i"
+zpty -w zoptout "stty rows 30 cols 100; zstyle ':zoysh:widget' bind no; source ${TEST_ROOT}/zoysh.plugin.zsh; bindkey '\\ey'; print OPTDONE"$'\r'
+zoysh_zpty_wait zoptout "undefined-key" 10
+assert_eq "1" "$ZPTY_WAITED" "zstyle :zoysh:widget bind no leaves M-y unbound"
+zpty -d zoptout
+ZOYSH_CONF=/dev/null
+
 print -r -- "1..${TESTS_RUN}"
 if (( TESTS_FAILED )); then
     print -u2 -r -- "${TESTS_FAILED} test(s) failed"

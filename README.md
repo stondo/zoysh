@@ -187,9 +187,33 @@ to `0600`.
 | `yo --version` | Show the installed version |
 | `yo --help` | Show help and current config |
 
+### ZLE widget
+
+Type your intent at the prompt, then press `M-y` (Alt+y): the buffer is sent
+as the query and the generated command replaces it in place, without leaving
+the line editor. With an empty buffer, `M-y` opens a small inline query
+prompt. The result is always editable before you press Enter.
+
+```zsh
+$ find big files modified today<M-y>     # buffer becomes the generated command
+```
+
+The widget copies the command straight into `BUFFER` (the ZLE-safe
+mechanism; `zle -U` would replay it through your keymap and can corrupt
+commands when other widgets are bound to ordinary characters). Bind a
+different key with:
+
+```zsh
+bindkey '\C-g' zoysh-widget
+```
+
+To keep M-y untouched, set `zstyle ':zoysh:widget' bind no` before the
+plugin loads; the widget stays available for manual binding.
+
 ## Features
 
 - **Command generation** — natural language to zsh command, prefilled for review
+- **ZLE widget** — press `M-y` on your typed intent to generate in place, never leaving the line editor
 - **Inline Q&A** — ask questions without leaving the terminal
 - **Streaming responses** — chat answers appear token by token over SSE, then re-render as terminal Markdown; thinking models stream with `<think>` reasoning hidden
 - **Instant cancellation** — Ctrl-C during a request kills the helper process group, keeps any partial answer, and prints `yo: cancelled`
@@ -229,6 +253,8 @@ Generated commands are untrusted model output. Zoysh only prefills the prompt; r
 Streaming responses are now part of Phase 1:
 
 - [x] Streaming responses
+- [x] Ctrl-C cancellation
+- [x] ZLE widget (script implementation; the C module port remains Phase 2)
 
 Session memory includes earlier `yo` exchanges. Arbitrary terminal-output capture remains a Phase 2 feature because it requires a PTY proxy.
 
