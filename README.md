@@ -192,6 +192,7 @@ to `0600`.
 - **Command generation** — natural language to zsh command, prefilled for review
 - **Inline Q&A** — ask questions without leaving the terminal
 - **Streaming responses** — chat answers appear token by token over SSE, then re-render as terminal Markdown; thinking models stream with `<think>` reasoning hidden
+- **Instant cancellation** — Ctrl-C during a request kills the helper process group, keeps any partial answer, and prints `yo: cancelled`
 - **Session memory** — remembers conversation context within a session
 - **Multi-provider** — Anthropic, OpenAI, OpenRouter, Kimi, DeepSeek, Qwen, z.ai, local models
 - **Shell-aware** — includes OS, zsh version, working directory, and git branch in context
