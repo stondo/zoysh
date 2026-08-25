@@ -280,15 +280,32 @@ Streaming responses are now part of Phase 1:
 
 Session memory includes earlier `yo` exchanges. Arbitrary terminal-output capture remains a Phase 2 feature because it requires a PTY proxy.
 
-### Phase 2: C loadable module (planned)
+### Phase 2: C loadable module (experimental)
 
-Phase 2 is experimental and is not part of the script-plugin release. The repository currently contains module boilerplate only.
+The first native subsystems have landed behind an opt-in switch:
 
-- [ ] Port `yo.c` core (LLM API logic) from yosh
-- [ ] ZLE widget registration
-- [ ] PTY proxy for scrollback capture
-- [ ] Multi-step task continuation
-- [ ] Ctrl-C cancellation (self-pipe signal trick)
+- [x] Module scaffold: lifecycle, `zoysh-status`, config parser (C port of `~/.yoconf`)
+- [x] API client: curl streaming with the same record protocol as the python helper
+- [x] Script bridge: `zstyle ':zoysh:engine' engine module` (default stays `script`)
+- [x] Ctrl-C cancellation preserved through the bridge
+- [ ] Full `yo.c` port (session memory, PTY proxy, ZLE integration in C)
+
+Build it against a configured zsh source tree (see the Development section);
+`make check` never requires the module, and the CI module job is
+allow-failure while it is experimental.
+
+#### Using the module engine
+
+```zsh
+zmodload zsh/zoysh            # after installing zoysh.so on your module_path
+zstyle ':zoysh:engine' engine module
+zoysh-status                  # prints the loaded configuration summary
+```
+
+The module engine speaks the identical streaming protocol; answers render
+byte-identically to the script engine (verified by the gated module tests).
+Generated commands, plans, cancellation, and the widget all keep working
+through the bridge, and API keys stay out of argv in both engines.
 
 ## Architecture
 
@@ -324,7 +341,20 @@ Install the script plugin under `PREFIX` (defaults to `~/.local`):
 make install
 ```
 
-The experimental C module is not part of the Phase 1 release. `make module` is opt-in and requires a configured zsh source tree plus the planned cJSON sources.
+The experimental C module is opt-in. `make module` requires a configured
+zsh source tree plus libcurl headers, for example:
+
+```sh
+git clone --depth 1 --branch zsh-5.9 https://github.com/zsh-users/zsh ~/src/zsh
+cd ~/src/zsh && ./Util/preconfig && ./configure --enable-multibyte && make -C Src zsh.mdh
+make module ZSH_SRC=~/src/zsh          # builds zoysh.so
+make check-module ZSH_SRC=~/src/zsh    # gated module tests (ZMODULE=1)
+```
+
+`make check` never builds the module. The module registers the `zoysh-status`
+and `zoysh-call` builtins; run the gated suite after building it. If your
+zsh tree needs extra include paths (for example for curses headers), pass
+`ZSH_EXTRA_CFLAGS=-I...`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow and [SECURITY.md](SECURITY.md) for private vulnerability reporting.
 

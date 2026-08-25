@@ -6,6 +6,20 @@ All notable changes to Zoysh are documented here. The project follows [Semantic 
 
 ### Added
 
+- Add the experimental native module scaffold with the first ported
+  subsystems: lifecycle with clean unload, a C port of the ~/.yoconf
+  parser surfaced through `zoysh-status`, and a curl-based streaming
+  client (`zoysh-call`) that speaks the identical NUL-record protocol as
+  the python helper, including incremental think suppression, wrap
+  accounting, non-SSE fallback, and Ctrl-C cancellation through a
+  progress-callback abort (the self-pipe idea reduced to a single-
+  threaded builtin). The script bridges to it with
+  `zstyle ':zoysh:engine' engine module` and falls back to script
+  whenever the module is absent; gated module tests
+  (make check-module) prove byte-identical rendering between engines.
+  The builtin table is heap-cloned and deregistered via setfeatureenables
+  on unload; plain entry points are exported alongside the mangled ones
+  for vendor zsh builds (Fedora) that dlsym unmangled names.
 - Add opt-in multi-step plans: with `continuation 1`, the model may answer
   with a fenced `zoysh:plan` block (one command per line, summary above).
   zoysh prefills each step for review, advances when the prefilled command
