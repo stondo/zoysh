@@ -59,6 +59,7 @@ typeset -gr _ZOYSH_DEFAULT_TOKEN_BUDGET="${ZOYSH_TOKEN_BUDGET:-4096}"
 typeset -gr _ZOYSH_DEFAULT_MAX_OUTPUT_TOKENS="${ZOYSH_MAX_OUTPUT_TOKENS:-4096}"
 typeset -gr _ZOYSH_DEFAULT_TIMEOUT="${ZOYSH_TIMEOUT:-30}"
 typeset -gr _ZOYSH_DEFAULT_STREAMING="${ZOYSH_STREAMING:-1}"
+typeset -gr _ZOYSH_DEFAULT_CONTINUATION="${ZOYSH_CONTINUATION:-0}"
 typeset -gr _ZOYSH_DEFAULT_SERVER_WEB="${ZOYSH_SERVER_WEB:-1}"
 typeset -gr _ZOYSH_DEFAULT_CHAT_PREFIX=${ZOYSH_CHAT_PREFIX:-$'\033[1;36myo\033[0m\n'}
 typeset -gr _ZOYSH_DEFAULT_COLOR_PREFIX=${ZOYSH_COLOR_PREFIX:-$'\033[0m'}
@@ -86,6 +87,7 @@ typeset -g ZOYSH_TOKEN_BUDGET
 typeset -g ZOYSH_MAX_OUTPUT_TOKENS
 typeset -g ZOYSH_TIMEOUT
 typeset -g ZOYSH_STREAMING
+typeset -g ZOYSH_CONTINUATION
 typeset -g ZOYSH_SERVER_WEB
 typeset -g ZOYSH_CHAT_PREFIX
 typeset -g ZOYSH_COLOR_PREFIX
@@ -109,6 +111,8 @@ typeset -g _ZOYSH_OLD_TRAPINT=""
 typeset -gi _ZOYSH_TRAP_DEPTH=0
 typeset -gi _ZOYSH_ZLE_MODE=0
 typeset -g _ZOYSH_LAST_COMMAND=""
+typeset -g _ZOYSH_PENDING_CMD=""
+typeset -g _ZOYSH_LINE_INIT_PREV_FUNC=""
 typeset -gi _ZOYSH_SCROLLBACK_WARNED=0
 typeset -gi _ZOYSH_MODEL_EXPLICIT=0
 
@@ -123,6 +127,7 @@ _zoysh_reset_config() {
     ZOYSH_MAX_OUTPUT_TOKENS="$_ZOYSH_DEFAULT_MAX_OUTPUT_TOKENS"
     ZOYSH_TIMEOUT="$_ZOYSH_DEFAULT_TIMEOUT"
     ZOYSH_STREAMING="$_ZOYSH_DEFAULT_STREAMING"
+    ZOYSH_CONTINUATION="$_ZOYSH_DEFAULT_CONTINUATION"
     ZOYSH_SERVER_WEB="$_ZOYSH_DEFAULT_SERVER_WEB"
     ZOYSH_CHAT_PREFIX="$_ZOYSH_DEFAULT_CHAT_PREFIX"
     ZOYSH_COLOR_PREFIX="$_ZOYSH_DEFAULT_COLOR_PREFIX"
@@ -171,6 +176,7 @@ _zoysh_load_config() {
             max_output_tokens) ZOYSH_MAX_OUTPUT_TOKENS="$val" ;;
             timeout)       ZOYSH_TIMEOUT="$val" ;;
             streaming)     ZOYSH_STREAMING="$val" ;;
+            continuation)  ZOYSH_CONTINUATION="$val" ;;
             server_web)    ZOYSH_SERVER_WEB="$val" ;;
             scrollback_enabled) ZOYSH_SCROLLBACK_ENABLED="$val" ;;
             scrollback_bytes)   ZOYSH_SCROLLBACK_BYTES="$val" ;;
@@ -227,6 +233,10 @@ _zoysh_validate_config() {
     if [[ "$ZOYSH_STREAMING" != 0 && "$ZOYSH_STREAMING" != 1 ]]; then
         printf 'zoysh: invalid streaming; using 1\n' >&2
         ZOYSH_STREAMING=1
+    fi
+    if [[ "$ZOYSH_CONTINUATION" != 0 && "$ZOYSH_CONTINUATION" != 1 ]]; then
+        printf 'zoysh: invalid continuation; using 0\n' >&2
+        ZOYSH_CONTINUATION=0
     fi
     if [[ "$ZOYSH_SERVER_WEB" != 0 && "$ZOYSH_SERVER_WEB" != 1 ]]; then
         printf 'zoysh: invalid server_web; using 1\n' >&2
@@ -422,6 +432,16 @@ Rules: output valid JSON only and never wrap it in a markdown fence. Prefer zsh 
 EOF
 }
 
+_zoysh_build_continuation_prompt() {
+    <<EOF
+
+Multi-step tasks: when several commands are needed, you may instead reply
+with a fenced block tagged zoysh:plan holding one shell command per line,
+with a one-line summary above the fence. The user runs each command
+themselves, one at a time. Prefer a single command whenever it is enough.
+EOF
+}
+
 # ─── Session Memory ──────────────────────────────────────────────────────────
 
 _zoysh_history_estimated_tokens() {
@@ -560,6 +580,7 @@ _zoysh_call_llm() {
     local query="$1"
     local sys_prompt endpoint
     sys_prompt="$(_zoysh_build_system_prompt)"
+    (( ZOYSH_CONTINUATION )) && sys_prompt+="$(_zoysh_build_continuation_prompt)"
     endpoint="$(_zoysh_api_endpoint)"
 
     if ! _zoysh_local_base_url >/dev/null &&
@@ -974,6 +995,7 @@ _zoysh_stream_call() {
     fi
 
     sys_prompt="$(_zoysh_build_system_prompt)"
+    (( ZOYSH_CONTINUATION )) && sys_prompt+="$(_zoysh_build_continuation_prompt)"
     request_body=$(_zoysh_build_request "$sys_prompt" "$query" 1) || {
         _ZOYSH_STREAM_ERROR="failed to build API request"
         return 1
@@ -1151,6 +1173,17 @@ else:
 
 # Strip <think> blocks (local reasoning models)
 content = re.sub(r"<think>.*?</think>\s*", "", str(content), flags=re.DOTALL).strip()
+
+# Multi-step plan block (only when continuation is enabled)
+if os.environ.get("ZPLAN") == "1":
+    plan = re.search(r"```zoysh:plan\s*\n(.*?)```", content, re.DOTALL)
+    if plan:
+        commands = [line.strip() for line in plan.group(1).splitlines() if line.strip()]
+        summary = (content[:plan.start()] + content[plan.end():]).strip()
+        if commands:
+            emit("plan", "\n".join(commands), summary[:400])
+            sys.exit(0)
+
 content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content, flags=re.IGNORECASE).strip()
 
 # Parse JSON
@@ -1279,6 +1312,134 @@ _zoysh_print_command() {
     [[ -n "$2" ]] && printf '\033[90m↳ %s\033[0m\n' "$2"
 }
 
+# ─── Multi-step Plans ────────────────────────────────────────────────────────
+#
+# When continuation is enabled the model may answer with a fenced
+# ```zoysh:plan``` block holding one command per line. zoysh prefills each
+# command for the user to run; a precmd hook watches history and advances the
+# queue only when the prefilled command itself was executed. zoysh never
+# executes plan commands itself, and any other command typed by the user
+# drops the queue silently.
+
+typeset -gi _ZOYSH_PLAN_ARMED=0
+typeset -g _ZOYSH_PLAN_STEP=0
+typeset -g _ZOYSH_PLAN_QUERY=""
+typeset -g _ZOYSH_PLAN_LAST_EXEC=""
+typeset -g -a _ZOYSH_PLAN_CMDS
+
+_zoysh_plan_preexec() {
+    # The exact command line the user is about to run. precmd then compares
+    # it with the prefilled plan step; fc cannot be used because history is
+    # not yet committed when precmd hooks fire.
+    _ZOYSH_PLAN_LAST_EXEC="$1"
+    return 0
+}
+
+_zoysh_plan_file() {
+    print -r -- "${ZOYSH_STATE_DIR:-${XDG_STATE_HOME:-${HOME}/.local/state}/zoysh}/plan"
+}
+
+_zoysh_plan_load() {
+    local plan_file
+    plan_file=$(_zoysh_plan_file)
+    [[ -f "$plan_file" ]] || return 1
+    local -a lines
+    lines=("${(@f)$(<"$plan_file")}")
+    if (( ${#lines[@]} < 3 )); then
+        command rm -f -- "$plan_file"
+        return 1
+    fi
+    _ZOYSH_PLAN_STEP="${lines[1]#step=}"
+    _ZOYSH_PLAN_QUERY="${lines[2]}"
+    _ZOYSH_PLAN_CMDS=("${(@)lines[3,-1]}")
+    [[ "$_ZOYSH_PLAN_STEP" == <-> ]] || return 1
+    (( _ZOYSH_PLAN_STEP >= 1 && _ZOYSH_PLAN_STEP <= ${#_ZOYSH_PLAN_CMDS[@]} )) || return 1
+    return 0
+}
+
+_zoysh_plan_save() {
+    local plan_file
+    plan_file=$(_zoysh_plan_file)
+    mkdir -p -- "${plan_file:h}"
+    {
+        print -r -- "step=$1"
+        print -r -- "$_ZOYSH_PLAN_QUERY"
+        printf '%s\n' "${_ZOYSH_PLAN_CMDS[@]}"
+    } > "$plan_file"
+}
+
+_zoysh_plan_prefill() {
+    local step="$1"
+    local cmd="${_ZOYSH_PLAN_CMDS[step]}"
+    if (( _ZOYSH_ZLE_MODE )); then
+        _ZOYSH_LAST_COMMAND="$cmd"
+    else
+        _ZOYSH_PENDING_CMD="$cmd"
+    fi
+    printf '\033[90mplan step %s/%s\033[0m\n' "$step" "${#_ZOYSH_PLAN_CMDS[@]}"
+}
+
+_zoysh_plan_begin() {
+    local query="$1" content="$2" summary="$3"
+    _ZOYSH_PLAN_QUERY="$query"
+    _ZOYSH_PLAN_CMDS=("${(@f)content}")
+    (( ${#_ZOYSH_PLAN_CMDS[@]} )) || return 1
+    [[ -n "$summary" ]] && printf '\033[90m↳ %s\033[0m\n' "$summary"
+    _zoysh_plan_save 1
+    _ZOYSH_PLAN_ARMED=1
+    _zoysh_plan_prefill 1
+    return 0
+}
+
+_zoysh_plan_advance() {
+    local next=$(( _ZOYSH_PLAN_STEP + 1 ))
+    if (( next > ${#_ZOYSH_PLAN_CMDS[@]} )); then
+        command rm -f -- "$(_zoysh_plan_file)"
+        printf '\033[90mzoysh: plan complete\033[0m\n'
+        return 0
+    fi
+    # No arming here: an advance from precmd needs the very next preexec/
+    # precmd pair to compare the newly prefilled command. Arming is only
+    # for yo invocations (plan start, --skip, --abort), whose own precmd
+    # must not compare the "yo ..." line itself.
+    _zoysh_plan_save "$next"
+    _zoysh_plan_prefill "$next"
+    return 0
+}
+
+_zoysh_plan_context() {
+    _zoysh_plan_load || return 0
+    local -a done_cmds remaining
+    local done_text="none" remaining_text=""
+    (( _ZOYSH_PLAN_STEP > 1 )) && done_cmds=("${(@)_ZOYSH_PLAN_CMDS[1,$(( _ZOYSH_PLAN_STEP - 1 ))]}")
+    remaining=("${(@)_ZOYSH_PLAN_CMDS[_ZOYSH_PLAN_STEP,-1]}")
+    (( ${#done_cmds[@]} )) && done_text="${(j:; :)done_cmds}"
+    remaining_text="${(j:; :)remaining}"
+    print -r -- "
+
+(Context: a zoysh plan for \"${_ZOYSH_PLAN_QUERY}\" is at step ${_ZOYSH_PLAN_STEP} of ${#_ZOYSH_PLAN_CMDS[@]}. Commands already run: ${done_text}. Remaining steps: ${remaining_text}. Account for this when answering.)"
+}
+
+_zoysh_plan_precmd() {
+    (( ZOYSH_CONTINUATION )) || return 0
+    if (( _ZOYSH_PLAN_ARMED )); then
+        # The prompt right after yo itself: the queue was just written or
+        # advanced, and history still holds the yo invocation.
+        _ZOYSH_PLAN_ARMED=0
+        return 0
+    fi
+    _zoysh_plan_load || return 0
+    local last="${_ZOYSH_PLAN_LAST_EXEC}"
+    last="${last#"${last%%[![:space:]]*}"}"
+    last="${last%"${last##*[![:space:]]}"}"
+    if [[ "$last" == "${_ZOYSH_PLAN_CMDS[_ZOYSH_PLAN_STEP]}" ]]; then
+        _zoysh_plan_advance
+    else
+        command rm -f -- "$(_zoysh_plan_file)"
+    fi
+    return 0
+}
+
 # ─── yo Command ──────────────────────────────────────────────────────────────
 
 yo() {
@@ -1293,6 +1454,8 @@ yo() {
                 printf 'Usage:\n'
                 printf '  yo <natural language>    Generate a shell command\n'
                 printf '  yo -c <question>         Ask a question inline\n'
+                printf '  yo --skip                Prefill the next step of an active plan\n'
+                printf '  yo --abort               Drop an active multi-step plan\n'
                 printf '  yo --clear               Clear session memory\n'
                 printf '  yo --version             Show version\n'
                 printf '  yo --help                Show this help\n\n'
@@ -1319,8 +1482,33 @@ yo() {
                 else
                     printf 'Hosted web search: disabled\n'
                 fi
+                if (( ZOYSH_CONTINUATION )); then
+                    printf 'Continuation: multi-step plans enabled (see yo --skip and yo --abort)\n'
+                else
+                    printf 'Continuation: disabled (single commands only)\n'
+                fi
                 return 0 ;;
             --clear) _zoysh_history_clear; return 0 ;;
+            --skip)
+                if _zoysh_plan_load; then
+                    _zoysh_plan_advance
+                    # Skip the precmd that follows this yo invocation itself;
+                    # the yo --skip line is not a plan command.
+                    _ZOYSH_PLAN_ARMED=1
+                else
+                    print "zoysh: no active plan"
+                    return 1
+                fi
+                return 0 ;;
+            --abort)
+                if [[ -f "$(_zoysh_plan_file)" ]]; then
+                    command rm -f -- "$(_zoysh_plan_file)"
+                    print "zoysh: plan aborted"
+                else
+                    print "zoysh: no active plan"
+                    return 1
+                fi
+                return 0 ;;
             --version) printf 'zoysh %s\n' "$ZOYSH_VERSION"; return 0 ;;
             --debug) ZOYSH_DEBUG=1; shift ;;
             --) shift; break ;;
@@ -1332,6 +1520,12 @@ yo() {
     [[ -z "$query" ]] && { print "Usage: yo <natural language>"; return 1 }
 
     (( chat_mode )) && query="Answer this (do NOT generate a command): $query"
+
+    if (( ZOYSH_CONTINUATION )); then
+        local plan_context
+        plan_context=$(_zoysh_plan_context)
+        [[ -n "$plan_context" ]] && query+="$plan_context"
+    fi
 
     _zoysh_trap_install
     if ! _zoysh_prepare_backend; then
@@ -1375,7 +1569,7 @@ yo() {
     _zoysh_trap_restore
 
     local parsed rtype rcontent rexplanation
-    parsed=$(_zoysh_parse_response "$response")
+    parsed=$(ZPLAN="$ZOYSH_CONTINUATION" _zoysh_parse_response "$response")
     rtype="${parsed%%$'\x1e'*}"
     local _rest="${parsed#*$'\x1e'}"
     rcontent="${_rest%%$'\x1e'*}"
@@ -1386,11 +1580,16 @@ yo() {
         _zoysh_history_add "$user_query" "command" "$rcontent"
         _ZOYSH_LAST_COMMAND="$rcontent"
         if (( _ZOYSH_ZLE_MODE )); then
-            # Inside ZLE the widget copies the command into BUFFER itself;
-            # print -z would queue it for the next prompt instead.
+            # Inside ZLE the widget copies the command into BUFFER itself.
             :
         else
-            print -z "$rcontent"
+            _ZOYSH_PENDING_CMD="$rcontent"
+        fi
+    elif [[ "$rtype" == "plan" ]]; then
+        _zoysh_history_add "$user_query" "chat" "$rcontent"
+        if ! _zoysh_plan_begin "$user_query" "$rcontent" "$rexplanation"; then
+            _zoysh_print_error "model returned an empty plan"
+            return 1
         fi
     elif [[ "$rtype" == "error" ]]; then
         _zoysh_print_error "$rcontent"
@@ -1493,10 +1692,41 @@ _zoysh_register_widget() {
     bindkey -M viins '\ey' zoysh-widget
 }
 
+# Prefill the next prompt for review. print -z pushes onto the input stack,
+# which zsh reads as the next command line and executes without any chance
+# to review; the zle-line-init hook below instead places the text into the
+# editor buffer so the user presses Enter (or edits) to run it.
+
+_zoysh_line_init() {
+    if [[ -n "$_ZOYSH_PENDING_CMD" ]]; then
+        BUFFER="$_ZOYSH_PENDING_CMD"
+        CURSOR=${#BUFFER}
+        _ZOYSH_PENDING_CMD=""
+    fi
+    if [[ -n "$_ZOYSH_LINE_INIT_PREV_FUNC" ]]; then
+        "${_ZOYSH_LINE_INIT_PREV_FUNC}" "$@"
+    fi
+    return 0
+}
+
+_zoysh_register_prefill() {
+    if (( ${+widgets[zle-line-init]} )); then
+        local previous="${widgets[zle-line-init]}"
+        local -a words
+        words=("${(z)previous}")
+        [[ "${words[1]}" == builtin:* || "${words[1]}" == completion:* ]] ||
+            _ZOYSH_LINE_INIT_PREV_FUNC="${words[1]}"
+    fi
+    zle -N zle-line-init _zoysh_line_init
+}
+
 # ─── Init ────────────────────────────────────────────────────────────────────
 
 _zoysh_reload_config
 _zoysh_register_widget
+_zoysh_register_prefill
+(( ${precmd_functions[(Ie)_zoysh_plan_precmd]} )) || precmd_functions+=(_zoysh_plan_precmd)
+(( ${preexec_functions[(Ie)_zoysh_plan_preexec]} )) || preexec_functions+=(_zoysh_plan_preexec)
 
 # Completion
 _yo() {
@@ -1504,6 +1734,8 @@ _yo() {
         '-c[ask a question]:question:' \
         '--chat[ask a question]:question:' \
         '--clear[clear session memory]' \
+        '--skip[prefill the next plan step]' \
+        '--abort[drop the active plan]' \
         '--version[show version]' \
         '--debug[show request diagnostics]' \
         '--help[show help]' \

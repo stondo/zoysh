@@ -93,6 +93,7 @@ server_web 1
 | `max_output_tokens` | `4096` | Maximum tokens generated for one response |
 | `timeout` | `30` | Seconds to wait for a connection or, when streaming, for the next chunk |
 | `streaming` | `1` | Stream responses over SSE; `0` sends one blocking request |
+| `continuation` | `0` | Multi-step plans: one `yo` query may queue several commands, prefilled one at a time |
 | `server_web` | `1` | Enable hosted web search for Anthropic Messages and OpenAI Responses |
 | `chat_prefix` | cyan `yo` heading | Text printed before chat responses |
 | `color_prefix` | terminal reset | Base chat text style |
@@ -183,6 +184,8 @@ to `0600`.
 |---------|-------------|
 | `yo <query>` | Generate a shell command (prefilled at prompt) |
 | `yo -c <question>` | Ask a question, get inline answer |
+| `yo --skip` | Prefill the next step of an active plan |
+| `yo --abort` | Drop an active multi-step plan |
 | `yo --clear` | Clear session memory |
 | `yo --version` | Show the installed version |
 | `yo --help` | Show help and current config |
@@ -210,6 +213,23 @@ bindkey '\C-g' zoysh-widget
 To keep M-y untouched, set `zstyle ':zoysh:widget' bind no` before the
 plugin loads; the widget stays available for manual binding.
 
+### Multi-step plans (off by default)
+
+**This changes the feel of the tool, so it is opt-in**: set `continuation 1`
+in `~/.yoconf`. With it, the model may answer a multi-step request with a
+fenced `zoysh:plan` block holding one command per line. zoysh then:
+
+1. Prefills step 1 at your prompt with a `plan step 1/N` marker. You press
+   Enter to run it (or edit it first).
+2. After each step runs, the next one is prefilled automatically.
+3. Any other command you type drops the queue silently.
+
+Nothing ever runs without your Enter. `yo --skip` prefills the next step
+without running the current one, and `yo --abort` drops the plan. Follow-up
+`yo` questions during a plan include the plan and the steps already run as
+context. Queue state lives in
+`${XDG_STATE_HOME:-~/.local/state}/zoysh/plan`.
+
 ## Features
 
 - **Command generation** — natural language to zsh command, prefilled for review
@@ -217,6 +237,7 @@ plugin loads; the widget stays available for manual binding.
 - **Inline Q&A** — ask questions without leaving the terminal
 - **Streaming responses** — chat answers appear token by token over SSE, then re-render as terminal Markdown; thinking models stream with `<think>` reasoning hidden
 - **Instant cancellation** — Ctrl-C during a request kills the helper process group, keeps any partial answer, and prints `yo: cancelled`
+- **Multi-step plans (opt-in)** — queue several commands from one query, prefilled one at a time with review before every Enter
 - **Session memory** — remembers conversation context within a session
 - **Multi-provider** — Anthropic, OpenAI, OpenRouter, Kimi, DeepSeek, Qwen, z.ai, local models
 - **Shell-aware** — includes OS, zsh version, working directory, and git branch in context
@@ -233,7 +254,7 @@ The query, current directory, operating system, zsh version, git branch, and bou
 
 When `server_web 1` is used with Anthropic or OpenAI, the provider may send search queries to its web-search service. Set `server_web 0` to prevent zoysh from enabling those tools.
 
-Generated commands are untrusted model output. Zoysh only prefills the prompt; review every command before pressing Enter, especially commands that modify files, permissions, packages, or remote systems.
+Generated commands are untrusted model output. Zoysh only prefills the prompt; review every command before pressing Enter, especially commands that modify files, permissions, packages, or remote systems. Prefilled text is placed in the editor buffer through a `zle-line-init` hook, so nothing executes until you accept the visible line.
 
 ## Release status and roadmap
 
@@ -255,6 +276,7 @@ Streaming responses are now part of Phase 1:
 - [x] Streaming responses
 - [x] Ctrl-C cancellation
 - [x] ZLE widget (script implementation; the C module port remains Phase 2)
+- [x] Multi-step task continuation (script implementation)
 
 Session memory includes earlier `yo` exchanges. Arbitrary terminal-output capture remains a Phase 2 feature because it requires a PTY proxy.
 

@@ -6,6 +6,14 @@ All notable changes to Zoysh are documented here. The project follows [Semantic 
 
 ### Added
 
+- Add opt-in multi-step plans: with `continuation 1`, the model may answer
+  with a fenced `zoysh:plan` block (one command per line, summary above).
+  zoysh prefills each step for review, advances when the prefilled command
+  itself runs (tracked via preexec, since history is not committed when
+  precmd fires), and drops the queue on any other command. `yo --skip`
+  advances without running, `yo --abort` drops the plan with a notice, and
+  follow-up queries carry the plan plus completed steps as context. Queue
+  state lives under the XDG state directory; the feature defaults to off.
 - Add a ZLE widget: `M-y` on a typed buffer (or on an empty buffer for an
   inline mini-prompt) generates the command directly into `BUFFER` without
   leaving the line editor. Results are assigned to BUFFER/CURSOR rather
@@ -36,6 +44,14 @@ All notable changes to Zoysh are documented here. The project follows [Semantic 
 
 ### Changed
 
+- Prefill commands through a `zle-line-init` hook instead of `print -z`.
+  print -z pushes onto the shell input stack, where any input already
+  queued in the terminal (an Enter pressed while yo was still running, or
+  pasted text) is applied to the pushed line and can execute it before the
+  user has reviewed it. The line-init hook keeps the text purely in the
+  editor buffer, so nothing runs without an explicit accept of the visible
+  line. Verified interactively: a prefilled command waits at the prompt
+  indefinitely until Enter.
 - Strengthen Yosh attribution and upstream copyright provenance throughout the project.
 - Refresh contributor, release, and issue documentation for the current provider set.
 
