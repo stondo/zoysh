@@ -6,6 +6,12 @@ All notable changes to Zoysh are documented here. The project follows [Semantic 
 
 ### Added
 
+- Add a ZLE widget: `M-y` on a typed buffer (or on an empty buffer for an
+  inline mini-prompt) generates the command directly into `BUFFER` without
+  leaving the line editor. Results are assigned to BUFFER/CURSOR rather
+  than pushed with `zle -U`, which would replay the command through the
+  user keymap. Rebind with `bindkey`, or set `zstyle ':zoysh:widget' bind
+  no` to keep M-y untouched.
 - Cancel in-flight requests with Ctrl-C. The streaming helper now runs in
   its own session, so one signal to its process group reaps python and curl
   together; chat answers keep whatever text already streamed, and a short

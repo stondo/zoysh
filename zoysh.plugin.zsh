@@ -107,6 +107,8 @@ typeset -gi _ZOYSH_CANCELLED=0
 typeset -g _ZOYSH_HELPER_PGID=""
 typeset -g _ZOYSH_OLD_TRAPINT=""
 typeset -gi _ZOYSH_TRAP_DEPTH=0
+typeset -gi _ZOYSH_ZLE_MODE=0
+typeset -g _ZOYSH_LAST_COMMAND=""
 typeset -gi _ZOYSH_SCROLLBACK_WARNED=0
 typeset -gi _ZOYSH_MODEL_EXPLICIT=0
 
@@ -1382,7 +1384,14 @@ yo() {
     if [[ "$rtype" == "command" ]]; then
         _zoysh_print_command "$rcontent" "$rexplanation"
         _zoysh_history_add "$user_query" "command" "$rcontent"
-        print -z "$rcontent"
+        _ZOYSH_LAST_COMMAND="$rcontent"
+        if (( _ZOYSH_ZLE_MODE )); then
+            # Inside ZLE the widget copies the command into BUFFER itself;
+            # print -z would queue it for the next prompt instead.
+            :
+        else
+            print -z "$rcontent"
+        fi
     elif [[ "$rtype" == "error" ]]; then
         _zoysh_print_error "$rcontent"
         return 1
@@ -1392,9 +1401,102 @@ yo() {
     fi
 }
 
+# ─── ZLE Widget ──────────────────────────────────────────────────────────────
+#
+# M-y turns the current ZLE buffer (or a mini-prompt query when the buffer is
+# empty) into a generated command without ever leaving the line editor: the
+# result replaces BUFFER directly. zle -U would replay the command through
+# the active keymap, which corrupts commands whenever the user has widgets
+# bound to ordinary characters (zsh-autosuggestions and friends), so the
+# widget assigns BUFFER and CURSOR instead.
+
+# Minimal raw-mode line reader for the widget mini-prompt. vared cannot be
+# used from inside a widget (ZLE refuses recursion) and the plain read
+# builtin returns immediately against ZLE's raw terminal, so the widget
+# reads and echoes one character at a time.
+
+_zoysh_widget_read() {
+    local char="" query=""
+    printf '%s' "$1"
+    while :; do
+        read -k1 -r char || { printf '\n'; return 1; }
+        case "$char" in
+            $'\n'|$'\r')
+                printf '\n'
+                REPLY="$query"
+                return 0
+                ;;
+            $'\x7f'|$'\b')
+                if (( ${#query} )); then
+                    query="${query[1,-2]}"
+                    printf '\b \b'
+                fi
+                ;;
+            $'\x03')
+                printf '\n'
+                return 130
+                ;;
+            $'\x15')
+                while (( ${#query} )); do
+                    query="${query[1,-2]}"
+                    printf '\b \b'
+                done
+                ;;
+            $'\x1b')
+                read -k1 -r -t 0.01 char 2>/dev/null
+                if [[ "$char" == "[" || "$char" == "O" ]]; then
+                    read -k1 -r -t 0.01 char 2>/dev/null
+                fi
+                ;;
+            *)
+                query+="$char"
+                printf '%s' "$char"
+                ;;
+        esac
+    done
+}
+
+_zoysh_widget() {
+    local query
+    if [[ -n "$NUMERIC" || -n "$BUFFER" ]]; then
+        query="$BUFFER"
+    else
+        zle -I
+        _zoysh_widget_read "${ZOYSH_CHAT_PREFIX%%$'\n'}query: "
+        case $? in
+            0) query="$REPLY" ;;
+            *) return 0 ;;
+        esac
+        [[ -z "$query" ]] && return 0
+    fi
+
+    _ZOYSH_ZLE_MODE=1
+    zle -I
+    yo "$query"
+    local yo_status=$?
+    _ZOYSH_ZLE_MODE=0
+
+    if (( yo_status == 0 )) && [[ -n "$_ZOYSH_LAST_COMMAND" ]]; then
+        BUFFER="$_ZOYSH_LAST_COMMAND"
+        CURSOR=${#BUFFER}
+    fi
+    zle reset-prompt
+    return 0
+}
+
+_zoysh_register_widget() {
+    (( ${+widgets[zoysh-widget]} )) || zle -N zoysh-widget _zoysh_widget
+    local bind_default
+    zstyle -s ':zoysh:widget' bind bind_default
+    [[ "$bind_default" == "no" ]] && return 0
+    bindkey -M emacs '\ey' zoysh-widget
+    bindkey -M viins '\ey' zoysh-widget
+}
+
 # ─── Init ────────────────────────────────────────────────────────────────────
 
 _zoysh_reload_config
+_zoysh_register_widget
 
 # Completion
 _yo() {
