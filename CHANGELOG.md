@@ -4,6 +4,17 @@ All notable changes to Zoysh are documented here. The project follows [Semantic 
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-26
+
+### Fixed
+
+- Stop the `command not found: user:zle-line-init` error that v0.4.0 printed
+  on every prompt draw when another plugin or the user config had registered
+  its own `zle-line-init` widget. The previous widget reference is now
+  resolved to its bare function name before chaining, self-chaining is
+  guarded, and the chain call is skipped if the target function no longer
+  exists. Foreign hooks chained this way still run (regression tested).
+
 ## [0.4.0] - 2026-08-25
 
 ### Added
