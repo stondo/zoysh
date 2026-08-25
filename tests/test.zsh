@@ -503,10 +503,10 @@ zpty -w zcancel1 "stty rows 30 cols 100; source ${TEST_ROOT}/zoysh.plugin.zsh"$'
 sleep 0.8
 zpty -r zcancel1 junk >/dev/null
 zpty -w zcancel1 "yo -c 'count for me'"$'\r'
-zoysh_zpty_wait zcancel1 "counting " 10
+zoysh_zpty_wait zcancel1 "counting " 25
 assert_eq "1" "$ZPTY_WAITED" "streaming cancel test saw partial output before Ctrl-C"
 zpty -w -n zcancel1 $'\x03'
-zoysh_zpty_wait zcancel1 "yo: cancelled" 10
+zoysh_zpty_wait zcancel1 "yo: cancelled" 25
 assert_eq "1" "$ZPTY_WAITED" "Ctrl-C during streaming prints the cancellation notice"
 sleep 1
 cancel_leftovers="$(pgrep -fc "127.0.0.1:${ZOYSH_STUB_PORT}" 2>/dev/null)"
@@ -514,10 +514,10 @@ cancel_leftovers="$(pgrep -fc "127.0.0.1:${ZOYSH_STUB_PORT}" 2>/dev/null)"
 assert_eq "0" "$cancel_leftovers" "Ctrl-C reaps the helper process group"
 zpty -w zcancel1 "print TRAPLEFT=\$(( \${+functions[TRAPINT]} )) ; print SHELL-OK-\$?"$'\r'
 zoysh_zpty_wait zcancel1 "TRAPLEFT=" 10
-zoysh_zpty_wait zcancel1 "SHELL-OK-" 5
+zoysh_zpty_wait zcancel1 "SHELL-OK-" 25
 assert_eq "1" "$ZPTY_WAITED" "the shell still executes commands after cancellation"
 zpty -w zcancel1 "print TRAPLEFT-\$(( \${+functions[TRAPINT]} ))"$'\r'
-zoysh_zpty_wait zcancel1 "TRAPLEFT-0" 5
+zoysh_zpty_wait zcancel1 "TRAPLEFT-0" 25
 assert_eq "1" "$ZPTY_WAITED" "the interrupt trap does not leak after cancellation"
 zpty -d zcancel1
 zoysh_stub_stop
@@ -530,13 +530,15 @@ sleep 0.8
 zpty -r zcancel2 junk >/dev/null
 zpty -w zcancel2 "yo -c 'slow one'"$'\r'
 blocking_started=0
-for (( i = 0; i < 50; i++ )); do
+# Slow CI runners (macos) can need several seconds of cold start before the
+# request even reaches the stub; poll generously since early exit is cheap.
+for (( i = 0; i < 150; i++ )); do
     grep -q "chat/completions" "$ZOYSH_STUB_LOG" 2>/dev/null && { blocking_started=1; break }
-    sleep 0.1
+    sleep 0.2
 done
 assert_eq "1" "$blocking_started" "blocking request is in flight before Ctrl-C"
 zpty -w -n zcancel2 $'\x03'
-zoysh_zpty_wait zcancel2 "yo: cancelled" 10
+zoysh_zpty_wait zcancel2 "yo: cancelled" 30
 assert_eq "1" "$ZPTY_WAITED" "Ctrl-C cancels the blocking request path"
 zpty -d zcancel2
 zoysh_stub_stop
@@ -576,9 +578,18 @@ zpty -d zwidget
 zoysh_stub_stop
 
 zpty -b zoptout "env ZOYSH_CONF=/dev/null HOME=$HOME PS1='ZO> ' zsh -f -i"
-zpty -w zoptout "stty rows 30 cols 100; zstyle ':zoysh:widget' bind no; source ${TEST_ROOT}/zoysh.plugin.zsh; bindkey '\\ey'; print OPTDONE"$'\r'
-zoysh_zpty_wait zoptout "undefined-key" 10
-assert_eq "1" "$ZPTY_WAITED" "zstyle :zoysh:widget bind no leaves M-y unbound"
+optout_probe="$(mktemp "${TMPDIR:-/tmp}/zoysh-optout.XXXXXX")"
+zpty -w zoptout "stty rows 30 cols 100; zstyle ':zoysh:widget' bind no; source ${TEST_ROOT}/zoysh.plugin.zsh; bindkey '\\ey' > $optout_probe 2>&1; print PROBED\$(( 6*7 ))"$'\r'
+zoysh_zpty_wait zoptout "PROBED42" 25
+assert_eq "1" "$ZPTY_WAITED" "the opt-out probe completed"
+# Stock zsh binds M-y to yank-pop in the emacs keymap (and leaves it
+# unbound in vi mode), so the assertion is "not bound to our widget".
+# Never assert "undefined-key": that message only appears when the
+# default keymap is vi (EDITOR containing "vi"), which depends on the
+# caller's environment.
+[[ "$(<"$optout_probe")" == *"zoysh-widget"* ]] && optout_bound=1 || optout_bound=0
+assert_eq "0" "$optout_bound" "zstyle :zoysh:widget bind no leaves M-y untouched"
+rm -f -- "$optout_probe"
 zpty -d zoptout
 ZOYSH_CONF=/dev/null
 

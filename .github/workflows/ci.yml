@@ -57,7 +57,9 @@ jobs:
           git clone --depth 1 --branch zsh-5.9 https://github.com/zsh-users/zsh "$HOME/zsh-src"
           cd "$HOME/zsh-src"
           ./Util/preconfig
-          ./configure --enable-multibyte --with-term-lib=ncursesw
+          # zsh's configure probes terminal capabilities and fails with
+          # "no controlling tty" in CI; script(1) lends it a pty.
+          script -qec "./configure --enable-multibyte --with-term-lib=ncursesw" /dev/null
           make -j"$(nproc)" -C Src zsh.mdh
 
       - name: Build the module
