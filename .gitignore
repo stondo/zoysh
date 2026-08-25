@@ -1,11 +1,9 @@
 # Build artifacts
 *.o
 *.so
-*.mdh
 *.pro
 *.mdhi
-src/*.mdh
-src/*.pro
+src/src/*.pro
 
 # Editor/IDE
 .idea/

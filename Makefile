@@ -67,4 +67,4 @@ check-module: module
 	ZMODULE=1 $(ZSH) -f -i tests/module.test.zsh
 
 clean:
-	rm -f $(MODULE_SO) src/*.o src/vendor/cJSON/*.o src/*.mdh src/*.pro src/*.mdhi
+	rm -f $(MODULE_SO) src/*.o src/vendor/cJSON/*.o

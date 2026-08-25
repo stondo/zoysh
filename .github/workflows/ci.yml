@@ -14,7 +14,9 @@ jobs:
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    # macOS runners are slow with the zpty-driven interactive tests; the
+    # suite needs well over the previous 10-minute cap there.
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:

@@ -1,0 +1,34 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Stefano Tondo
+ *
+ * zoysh.mdh - module definition header for the zoysh zsh module.
+ *
+ * Out-of-tree modules normally have this file generated from an mdd by the
+ * zsh build system; it is hand written following the shape of the generated
+ * headers (see Src/Modules/datetime.mdh in a configured zsh tree) so the
+ * module builds against a configured zsh source tree without running the
+ * zsh module generator.
+ *
+ * Zoysh is a port and adaptation of Yosh by Fil Pizlo:
+ * https://github.com/pizlonator/yosh
+ * Yosh readline-8.2.13/yo.c is Copyright (C) 2026 Epic Games, Inc.
+ */
+
+#ifndef have_zshQszoysh_module
+#define have_zshQszoysh_module
+
+# ifndef IMPORTING_MODULE_zshQszoysh
+#   define boot_ boot_zshQszoysh
+#   define cleanup_ cleanup_zshQszoysh
+#   define features_ features_zshQszoysh
+#   define enables_ enables_zshQszoysh
+#   define setup_ setup_zshQszoysh
+#   define finish_ finish_zshQszoysh
+# endif /* !IMPORTING_MODULE_zshQszoysh */
+
+/* Module dependencies */
+# define IMPORTING_MODULE_zshQsmain 1
+# include "zsh.mdh"
+
+#endif /* !have_zshQszoysh_module */
