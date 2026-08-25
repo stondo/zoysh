@@ -1820,6 +1820,25 @@ _zoysh_register_prefill() {
 
 # ─── Init ────────────────────────────────────────────────────────────────────
 
+# Self-update check (runs at most once a day, never blocks the prompt):
+# when the plugin lives in its own git clone (oh-my-zsh plugin dir on other
+# machines) and origin has newer commits, fetch quietly in the background so
+# the NEXT shell picks the fix up. Dev checkouts are detected by the local
+# branch differing from the canonical repo path and left untouched.
+_zoysh_maybe_selfupdate() {
+    [[ -d "$ZSH_CUSTOM/plugins/zoysh/.git" ]] || return 0
+    local stamp="$ZSH_CACHE_DIR/.zoysh-lastupdate"
+    [[ -n "$ZSH_CACHE_DIR" ]] || ZSH_CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/omz"
+    mkdir -p "$ZSH_CACHE_DIR"
+    if [[ -f "$stamp" ]] && (( $(date +%s) - $(<"$stamp") < 86400 )); then
+        return 0
+    fi
+    date +%s > "$stamp"
+    ( cd "$ZSH_CUSTOM/plugins/zoysh" && git fetch -q origin main &&       [[ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]] &&       git pull -q origin main ) &!
+}
+
+_zoysh_maybe_selfupdate
+
 _zoysh_reload_config
 _zoysh_register_widget
 _zoysh_register_prefill
