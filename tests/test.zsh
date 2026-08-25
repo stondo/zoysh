@@ -582,6 +582,95 @@ assert_eq "1" "$ZPTY_WAITED" "zstyle :zoysh:widget bind no leaves M-y unbound"
 zpty -d zoptout
 ZOYSH_CONF=/dev/null
 
+# ── Multi-step plan tests ────────────────────────────────────────────────────
+
+plan_response='{"choices":[{"message":{"content":"Build all the things\n```zoysh:plan\necho step-one\necho step-two\necho step-three\n```"}}]}'
+ZPLAN=1 parse_reply "$plan_response"
+assert_eq "plan" "$REPLY_TYPE" "plan response type"
+assert_eq $'echo step-one\necho step-two\necho step-three' "$REPLY_CONTENT" "plan commands are parsed one per line"
+assert_eq "Build all the things" "$REPLY_EXPLANATION" "plan summary comes from outside the fence"
+ZPLAN=0 parse_reply "$plan_response"
+assert_eq "chat" "$REPLY_TYPE" "plan blocks stay plain chat when continuation is off"
+
+printf '%s\n' 'continuation maybe' >> "$tmp_config"
+ZOYSH_CONF="$tmp_config"
+_zoysh_reload_config 2>/dev/null
+assert_eq "0" "$ZOYSH_CONTINUATION" "invalid continuation falls back to disabled"
+printf '%s\n' 'continuation 1' >> "$tmp_config"
+_zoysh_reload_config 2>/dev/null
+assert_eq "1" "$ZOYSH_CONTINUATION" "continuation directive enables plans"
+ZOYSH_CONF=/dev/null
+
+zoysh_stub_start plan3
+plan_state="$(mktemp -d "${TMPDIR:-/tmp}/zoysh-plan.XXXXXX")"
+printf 'provider local\nbase_url http://127.0.0.1:%s/v1\nkey local\ncontinuation 1\n' "$ZOYSH_STUB_PORT" > "$tmp_config"
+zpty -b zplan "env ZOYSH_CONF=$tmp_config ZOYSH_STATE_DIR=$plan_state HOME=$HOME PS1='ZP> ' zsh -f -i"
+zpty -w -n zplan "stty rows 30 cols 100; source ${TEST_ROOT}/zoysh.plugin.zsh"$'\r'
+sleep 0.8
+zpty -r zplan junk >/dev/null
+zpty -w -n zplan "yo build all the things"$'\r'
+zoysh_zpty_wait zplan "echo step-one" 15
+assert_eq "1" "$ZPTY_WAITED" "plan step one is prefilled for review"
+[[ "${REPLY}" == *"plan step 1/3"* ]] && plan_ind1=1 || plan_ind1=0
+assert_eq "1" "$plan_ind1" "plan progress indicator prints"
+zpty -w -n zplan $'\r'
+zoysh_zpty_wait zplan "echo step-two" 15
+assert_eq "1" "$ZPTY_WAITED" "running step one prefills step two"
+[[ "${REPLY}" == *"plan step 2/3"* ]] && plan_ind2=1 || plan_ind2=0
+assert_eq "1" "$plan_ind2" "step two indicator prints after step one runs"
+zpty -w -n zplan $'\r'
+zoysh_zpty_wait zplan "echo step-three" 15
+assert_eq "1" "$ZPTY_WAITED" "running step two prefills step three"
+zpty -w -n zplan $'\r'
+zoysh_zpty_wait zplan "plan complete" 15
+assert_eq "1" "$ZPTY_WAITED" "finishing the last step completes the plan"
+[[ -f "$plan_state/plan" ]] && plan_file_left=1 || plan_file_left=0
+assert_eq "0" "$plan_file_left" "the queue file is removed when the plan completes"
+zpty -d zplan
+
+zoysh_stub_stop
+zoysh_stub_start plan3
+printf 'provider local\nbase_url http://127.0.0.1:%s/v1\nkey local\ncontinuation 1\n' "$ZOYSH_STUB_PORT" > "$tmp_config"
+zpty -b zabort "env ZOYSH_CONF=$tmp_config ZOYSH_STATE_DIR=$plan_state HOME=$HOME PS1='ZB> ' zsh -f -i"
+zpty -w -n zabort "stty rows 30 cols 100; source ${TEST_ROOT}/zoysh.plugin.zsh"$'\r'
+sleep 0.8
+zpty -r zabort junk >/dev/null
+zpty -w -n zabort "yo build all the things"$'\r'
+zoysh_zpty_wait zabort "echo step-one" 15
+assert_eq "1" "$ZPTY_WAITED" "abort session reaches step one"
+zpty -w -n zabort $'\x15'
+sleep 0.3
+zpty -w -n zabort "yo --abort"$'\r'
+zoysh_zpty_wait zabort "plan aborted" 15
+assert_eq "1" "$ZPTY_WAITED" "yo --abort drops the queue with a notice"
+[[ -f "$plan_state/plan" ]] && abort_file_left=1 || abort_file_left=0
+assert_eq "0" "$abort_file_left" "yo --abort removes the queue file"
+zpty -d zabort
+zoysh_stub_stop
+
+zoysh_stub_start command
+printf 'provider local\nbase_url http://127.0.0.1:%s/v1\nkey local\ncontinuation 1\n' "$ZOYSH_STUB_PORT" > "$tmp_config"
+zpty -b zsingle "env ZOYSH_CONF=$tmp_config ZOYSH_STATE_DIR=$plan_state HOME=$HOME PS1='ZS> ' zsh -f -i"
+zpty -w -n zsingle "stty rows 30 cols 100; source ${TEST_ROOT}/zoysh.plugin.zsh"$'\r'
+sleep 0.8
+zpty -r zsingle junk >/dev/null
+zpty -w -n zsingle "yo say hi"$'\r'
+zoysh_zpty_wait zsingle "echo hello-zoysh" 15
+assert_eq "1" "$ZPTY_WAITED" "single commands still prefill with continuation on"
+sleep 1.5
+zpty -r zsingle quiet
+[[ "$quiet" == *"hello-zoysh"* ]] && single_autoran=1 || single_autoran=0
+assert_eq "0" "$single_autoran" "a prefilled command never runs without Enter"
+[[ -f "$plan_state/plan" ]] && single_queue=1 || single_queue=0
+assert_eq "0" "$single_queue" "single commands do not create a queue"
+zpty -w -n zsingle $'\r'
+zoysh_zpty_wait zsingle "hello-zoysh" 10
+assert_eq "1" "$ZPTY_WAITED" "the prefilled command runs after an explicit Enter"
+zpty -d zsingle
+zoysh_stub_stop
+rm -rf -- "$plan_state"
+ZOYSH_CONF=/dev/null
+
 print -r -- "1..${TESTS_RUN}"
 if (( TESTS_FAILED )); then
     print -u2 -r -- "${TESTS_FAILED} test(s) failed"
