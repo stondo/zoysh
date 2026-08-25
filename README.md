@@ -15,11 +15,11 @@ Type `yo <natural language>` at your zsh prompt. Get a command prefilled for rev
 > Zoysh never executes generated commands. It places them in the prompt so you can inspect and edit them first.
 
 ```
-$ yo find all python files modified today
+$ yo "find all python files modified today"
 find . -type f -name "*.py" -newermt "$(date +%Y-%m-%d)"
 # ↑ prefilled at your prompt — press Enter to run, or edit first
 
-$ yo -c what does the -exec flag in find do?
+$ yo -c "what does the -exec flag in find do?"
 The -exec flag runs a command on each matched file...
 ```
 
@@ -211,7 +211,7 @@ the line editor. With an empty buffer, `M-y` opens a small inline query
 prompt. The result is always editable before you press Enter.
 
 ```zsh
-$ find big files modified today<M-y>     # buffer becomes the generated command
+$ find big files modified today<M-y>   # buffer text is the query; quotes not needed inside ZLE     # buffer becomes the generated command
 ```
 
 The widget copies the command straight into `BUFFER` (the ZLE-safe

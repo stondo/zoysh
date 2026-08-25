@@ -90,7 +90,7 @@ make test
 
 # Manual test
 zsh -f -i -c 'ZOYSH_CONF=/dev/null; source zoysh.plugin.zsh; yo --help'
-zsh -f -i -c 'source zoysh.plugin.zsh; yo list all python files'
+zsh -f -i -c 'source zoysh.plugin.zsh; yo "list all python files"'
 ```
 
 ## Conventions
