@@ -74,7 +74,7 @@ parse_reply() {
     REPLY_EXPLANATION="${rest#*$'\x1e'}"
 }
 
-assert_eq "0.3.0" "$ZOYSH_VERSION" "version is release version"
+assert_eq "0.4.0" "$ZOYSH_VERSION" "version is release version"
 
 assert_eq $'\033[1;36myo\033[0m\n' "$ZOYSH_CHAT_PREFIX" "default chat prefix contains real ANSI escapes"
 assert_eq $'\033[1m' "$ZOYSH_ENABLE_BOLD" "default bold style contains real ANSI escape"

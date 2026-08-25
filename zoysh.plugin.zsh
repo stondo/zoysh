@@ -44,7 +44,7 @@ fi
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
-typeset -g ZOYSH_VERSION="0.3.0"
+typeset -g ZOYSH_VERSION="0.4.0"
 typeset -g ZOYSH_CONF="${ZOYSH_CONF:-${HOME}/.yoconf}"
 typeset -gi ZOYSH_DEBUG=0
 

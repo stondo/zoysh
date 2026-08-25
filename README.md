@@ -273,7 +273,7 @@ Generated commands are untrusted model output. Zoysh only prefills the prompt; r
 
 ## Release status and roadmap
 
-### Phase 1: Script plugin (v0.3.0)
+### Phase 1: Script plugin (v0.4.0)
 - [x] `yo` command via zsh function
 - [x] Command prefilling via `print -z`
 - [x] Session memory
