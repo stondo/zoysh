@@ -14,17 +14,23 @@ source "${TEST_ROOT}/zoysh.plugin.zsh" || exit 1
 
 typeset -g ZOYSH_STUB_PID=""
 typeset -g ZOYSH_STUB_LOG=""
-typeset -gi ZOYSH_STUB_PORT=9199
+typeset -gi ZOYSH_STUB_PORT=0
 
 zoysh_stub_start() {
     local script="$1"
-    (( $# > 1 )) && ZOYSH_STUB_PORT=$2
+    # A per-invocation port avoids interference from stray listeners left by
+    # earlier runs or by interactive smoke tests on the default port.
+    ZOYSH_STUB_PORT=$(( 21000 + RANDOM % 20000 ))
     ZOYSH_STUB_LOG="$(mktemp "${TMPDIR:-/tmp}/zoysh-stub-log.XXXXXX")"
     python3 "${TEST_ROOT}/tests/stub_server.py" "$ZOYSH_STUB_PORT" "$script" "$ZOYSH_STUB_LOG" \
         >/dev/null 2>&1 &
     ZOYSH_STUB_PID=$!
     local waited=0
     until curl -fsS --max-time 1 "http://127.0.0.1:${ZOYSH_STUB_PORT}/v1/models" >/dev/null 2>&1; do
+        if ! kill -0 "$ZOYSH_STUB_PID" 2>/dev/null; then
+            print -u2 "stub server died on port ${ZOYSH_STUB_PORT}"
+            exit 1
+        fi
         (( waited++ > 40 )) && { print -u2 "stub server failed to start"; exit 1 }
         sleep 0.1
     done
