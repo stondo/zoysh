@@ -474,6 +474,74 @@ _zoysh_reload_config 2>/dev/null
 assert_eq "1" "$ZOYSH_STREAMING" "invalid streaming value falls back to enabled"
 ZOYSH_CONF=/dev/null
 
+# ── Cancellation tests ───────────────────────────────────────────────────────
+
+zmodload zsh/zpty
+
+zoysh_zpty_wait() {
+    ZPTY_WAITED=0
+    local name="$1" pattern="$2" timeout="$3" acc="" chunk
+    local deadline=$(( EPOCHSECONDS + timeout ))
+    while (( EPOCHSECONDS < deadline )); do
+        zpty -r "$name" chunk 2>/dev/null
+        acc="${acc}${chunk}"
+        [[ "$acc" == *"$pattern"* ]] && { ZPTY_WAITED=1; break; }
+        sleep 0.2
+    done
+    REPLY="$acc"
+}
+
+cancel_config() {
+    printf 'provider local\nbase_url http://127.0.0.1:%s/v1\nkey local\ntimeout 30\nstreaming %s\n' \
+        "$ZOYSH_STUB_PORT" "$1" > "$tmp_config"
+}
+
+zoysh_stub_start slow
+cancel_config 1
+zpty -b zcancel1 "env ZOYSH_CONF=$tmp_config HOME=$HOME PS1='ZC1> ' zsh -f -i"
+zpty -w zcancel1 "stty rows 30 cols 100; source ${TEST_ROOT}/zoysh.plugin.zsh"$'\r'
+sleep 0.8
+zpty -r zcancel1 junk >/dev/null
+zpty -w zcancel1 "yo -c 'count for me'"$'\r'
+zoysh_zpty_wait zcancel1 "counting " 10
+assert_eq "1" "$ZPTY_WAITED" "streaming cancel test saw partial output before Ctrl-C"
+zpty -w -n zcancel1 $'\x03'
+zoysh_zpty_wait zcancel1 "yo: cancelled" 10
+assert_eq "1" "$ZPTY_WAITED" "Ctrl-C during streaming prints the cancellation notice"
+sleep 1
+cancel_leftovers="$(pgrep -fc "127.0.0.1:${ZOYSH_STUB_PORT}" 2>/dev/null)"
+[[ "$cancel_leftovers" == "" ]] && cancel_leftovers=0
+assert_eq "0" "$cancel_leftovers" "Ctrl-C reaps the helper process group"
+zpty -w zcancel1 "print TRAPLEFT=\$(( \${+functions[TRAPINT]} )) ; print SHELL-OK-\$?"$'\r'
+zoysh_zpty_wait zcancel1 "TRAPLEFT=" 10
+zoysh_zpty_wait zcancel1 "SHELL-OK-" 5
+assert_eq "1" "$ZPTY_WAITED" "the shell still executes commands after cancellation"
+zpty -w zcancel1 "print TRAPLEFT-\$(( \${+functions[TRAPINT]} ))"$'\r'
+zoysh_zpty_wait zcancel1 "TRAPLEFT-0" 5
+assert_eq "1" "$ZPTY_WAITED" "the interrupt trap does not leak after cancellation"
+zpty -d zcancel1
+zoysh_stub_stop
+
+zoysh_stub_start veryslow
+cancel_config 0
+zpty -b zcancel2 "env ZOYSH_CONF=$tmp_config HOME=$HOME PS1='ZC2> ' zsh -f -i"
+zpty -w zcancel2 "stty rows 30 cols 100; source ${TEST_ROOT}/zoysh.plugin.zsh"$'\r'
+sleep 0.8
+zpty -r zcancel2 junk >/dev/null
+zpty -w zcancel2 "yo -c 'slow one'"$'\r'
+blocking_started=0
+for (( i = 0; i < 50; i++ )); do
+    grep -q "chat/completions" "$ZOYSH_STUB_LOG" 2>/dev/null && { blocking_started=1; break }
+    sleep 0.1
+done
+assert_eq "1" "$blocking_started" "blocking request is in flight before Ctrl-C"
+zpty -w -n zcancel2 $'\x03'
+zoysh_zpty_wait zcancel2 "yo: cancelled" 10
+assert_eq "1" "$ZPTY_WAITED" "Ctrl-C cancels the blocking request path"
+zpty -d zcancel2
+zoysh_stub_stop
+ZOYSH_CONF=/dev/null
+
 print -r -- "1..${TESTS_RUN}"
 if (( TESTS_FAILED )); then
     print -u2 -r -- "${TESTS_FAILED} test(s) failed"

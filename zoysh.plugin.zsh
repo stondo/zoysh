@@ -103,6 +103,10 @@ typeset -g ZOYSH_SCROLLBACK_LINES=1000
 typeset -g _ZOYSH_BACKEND_ERROR=""
 typeset -g _ZOYSH_STREAM_ERROR=""
 typeset -g _ZOYSH_RAW_RESPONSE=""
+typeset -gi _ZOYSH_CANCELLED=0
+typeset -g _ZOYSH_HELPER_PGID=""
+typeset -g _ZOYSH_OLD_TRAPINT=""
+typeset -gi _ZOYSH_TRAP_DEPTH=0
 typeset -gi _ZOYSH_SCROLLBACK_WARNED=0
 typeset -gi _ZOYSH_MODEL_EXPLICIT=0
 
@@ -611,6 +615,55 @@ _zoysh_call_llm() {
     print -r -- "$response"
 }
 
+# ─── Cancellation ────────────────────────────────────────────────────────────
+#
+# While yo waits on the network, Ctrl-C must kill the helper process group,
+# keep whatever output already reached the terminal, restore the prompt, and
+# leave no trap residue behind. The trap returns 0 so the interrupted builtin
+# unwinds and the calling function runs its own cleanup; a non-zero return
+# from TRAPINT would abort the whole function before it could restore state.
+# Install/restore are depth counted so yo() and the streaming call can both
+# guard the same critical section.
+
+_zoysh_trap_install() {
+    if (( _ZOYSH_TRAP_DEPTH++ == 0 )); then
+        # The plugin runs under "emulate -L zsh", whose sticky localtraps
+        # would scope the TRAPINT definition to this very function and disarm
+        # it the moment we return. Unset it so the trap arms globally.
+        unsetopt localtraps
+        _ZOYSH_CANCELLED=0
+        _ZOYSH_HELPER_PGID=""
+        _ZOYSH_OLD_TRAPINT=""
+        (( ${+functions[TRAPINT]} )) && _ZOYSH_OLD_TRAPINT="${functions[TRAPINT]}"
+        functions[TRAPINT]='
+            if (( ! _ZOYSH_CANCELLED )); then
+                _ZOYSH_CANCELLED=1
+                if [[ -n "$_ZOYSH_HELPER_PGID" ]]; then
+                    kill -TERM -- "-$_ZOYSH_HELPER_PGID" 2>/dev/null
+                fi
+            fi
+            return 0
+        '
+    fi
+}
+
+_zoysh_trap_restore() {
+    (( _ZOYSH_TRAP_DEPTH )) || return 0
+    if (( --_ZOYSH_TRAP_DEPTH == 0 )); then
+        unsetopt localtraps
+        if [[ -n "$_ZOYSH_OLD_TRAPINT" ]]; then
+            functions[TRAPINT]="$_ZOYSH_OLD_TRAPINT"
+        elif (( ${+functions[TRAPINT]} )); then
+            unfunction TRAPINT
+        fi
+        _ZOYSH_HELPER_PGID=""
+    fi
+}
+
+_zoysh_print_cancelled() {
+    printf '\033[90myo: cancelled\033[0m\n'
+}
+
 # ─── Streaming LLM Call ──────────────────────────────────────────────────────
 #
 # The streaming helper runs curl, decodes provider SSE incrementally, and
@@ -628,6 +681,14 @@ _zoysh_call_llm() {
 
 typeset -gr _ZOYSH_STREAM_HELPER='
 import json, os, re, signal, subprocess, sys, tempfile, unicodedata
+
+# Detach into our own session so the whole helper subtree (python plus curl)
+# can be terminated as one process group from zsh without touching the
+# interactive shell, and without receiving terminal-generated SIGINT.
+try:
+    os.setsid()
+except OSError:
+    pass
 
 def emit(kind, payload=""):
     data = (kind + payload).encode("utf-8", "replace").replace(b"\x00", b"") + b"\x00"
@@ -898,7 +959,7 @@ emit("Z")
 _zoysh_stream_call() {
     local display="$1" query="$2"
     local endpoint sys_prompt request_body body_file rec type payload
-    local helper_pid="" raw="" http_status="" fallback_body="" error_message=""
+    local raw="" http_status="" fallback_body="" error_message=""
     local disp_lines=0 disp_col=0 visible=0 saw_end=0
 
     _ZOYSH_STREAM_ERROR=""
@@ -916,6 +977,11 @@ _zoysh_stream_call() {
         return 1
     }
 
+    if (( _ZOYSH_CANCELLED )); then
+        _zoysh_trap_restore
+        return 130
+    fi
+
     [[ $ZOYSH_DEBUG -eq 1 ]] && printf 'DEBUG body: %.200s\n' "$request_body" >&2
 
     body_file="$(mktemp "${TMPDIR:-/tmp}/zoysh-body.XXXXXX")"
@@ -923,6 +989,7 @@ _zoysh_stream_call() {
 
     local -i term_cols=${COLUMNS:-80}
     (( term_cols < 10 )) && term_cols=80
+    _zoysh_trap_install
     local -i sfd
     exec {sfd}< <(ZPROV="$ZOYSH_PROVIDER" ZKEY="$ZOYSH_API_KEY" \
         ZWEB="$ZOYSH_SERVER_WEB" ZCOLS="$term_cols" ZVER="$ZOYSH_VERSION" \
@@ -932,7 +999,7 @@ _zoysh_stream_call() {
         type="${rec[1]}"
         payload="${rec[2,-1]}"
         case "$type" in
-            P) helper_pid="$payload" ;;
+            P) _ZOYSH_HELPER_PGID="$payload" ;;
             D)
                 if [[ "$display" == "chat" ]]; then
                     printf '%s' "$payload"
@@ -953,8 +1020,20 @@ _zoysh_stream_call() {
     exec {sfd}<&-
     rm -f -- "$body_file"
 
+    local kill_group="$_ZOYSH_HELPER_PGID"
+    if (( _ZOYSH_CANCELLED )); then
+        if [[ "$display" == "chat" && "$visible" == 1 ]]; then
+            printf '\n'
+        fi
+        _zoysh_trap_restore
+        return 130
+    fi
+    _zoysh_trap_restore
+
     if (( ! saw_end )); then
-        [[ -n "$helper_pid" ]] && kill "$helper_pid" 2>/dev/null
+        if [[ -n "$kill_group" ]]; then
+            kill -TERM -- "-$kill_group" 2>/dev/null
+        fi
         _ZOYSH_STREAM_ERROR="timed out after ${ZOYSH_TIMEOUT}s without a chunk from ${ZOYSH_PROVIDER}"
         return 1
     fi
@@ -1252,7 +1331,13 @@ yo() {
 
     (( chat_mode )) && query="Answer this (do NOT generate a command): $query"
 
+    _zoysh_trap_install
     if ! _zoysh_prepare_backend; then
+        _zoysh_trap_restore
+        if (( _ZOYSH_CANCELLED )); then
+            _zoysh_print_cancelled
+            return 130
+        fi
         _zoysh_print_error "$_ZOYSH_BACKEND_ERROR"
         return 1
     fi
@@ -1262,6 +1347,11 @@ yo() {
         local stream_display=command
         (( chat_mode )) && stream_display=chat
         if ! _zoysh_stream_call "$stream_display" "$query"; then
+            _zoysh_trap_restore
+            if (( _ZOYSH_CANCELLED )); then
+                _zoysh_print_cancelled
+                return 130
+            fi
             _zoysh_print_error "$_ZOYSH_STREAM_ERROR"
             return 1
         fi
@@ -1269,11 +1359,18 @@ yo() {
     else
         response=$(_zoysh_call_llm "$query")
         call_status=$?
+        if (( _ZOYSH_CANCELLED )); then
+            _zoysh_trap_restore
+            _zoysh_print_cancelled
+            return 130
+        fi
+        _zoysh_trap_restore
         if (( call_status != 0 )) || [[ -z "$response" ]]; then
             _zoysh_print_error "${response:-API call failed}"
             return 1
         fi
     fi
+    _zoysh_trap_restore
 
     local parsed rtype rcontent rexplanation
     parsed=$(_zoysh_parse_response "$response")

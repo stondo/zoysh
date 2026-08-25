@@ -6,6 +6,12 @@ All notable changes to Zoysh are documented here. The project follows [Semantic 
 
 ### Added
 
+- Cancel in-flight requests with Ctrl-C. The streaming helper now runs in
+  its own session, so one signal to its process group reaps python and curl
+  together; chat answers keep whatever text already streamed, and a short
+  `yo: cancelled` notice replaces the error. The interrupt trap is scoped to
+  the request and verified not to leak into normal shell behavior (the
+  plugin must arm it against the sticky `localtraps` of its emulation).
 - Stream responses over SSE with per-provider delta decoding (Chat
   Completions, Anthropic Messages, OpenAI Responses). Chat answers print
   progressively, then the streamed text is replaced by the rendered Markdown,
