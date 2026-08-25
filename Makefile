@@ -1,6 +1,9 @@
 # Makefile for zoysh — LLM-powered zsh assistant
 
-ZSH ?= zsh
+# Frameworks like oh-my-zsh export ZSH, and "?=" would let that leak into the
+# check target. A plain assignment wins over the environment; pass ZSH=... on
+# the make command line to override.
+ZSH = zsh
 PREFIX ?= $(HOME)/.local
 DESTDIR ?=
 INSTALL ?= install

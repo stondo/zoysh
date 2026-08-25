@@ -10,6 +10,36 @@ typeset -gi TESTS_FAILED=0
 export ZOYSH_CONF=/dev/null
 source "${TEST_ROOT}/zoysh.plugin.zsh" || exit 1
 
+# ── Stub server helpers ──────────────────────────────────────────────────────
+
+typeset -g ZOYSH_STUB_PID=""
+typeset -g ZOYSH_STUB_LOG=""
+typeset -gi ZOYSH_STUB_PORT=9199
+
+zoysh_stub_start() {
+    local script="$1"
+    (( $# > 1 )) && ZOYSH_STUB_PORT=$2
+    ZOYSH_STUB_LOG="$(mktemp "${TMPDIR:-/tmp}/zoysh-stub-log.XXXXXX")"
+    python3 "${TEST_ROOT}/tests/stub_server.py" "$ZOYSH_STUB_PORT" "$script" "$ZOYSH_STUB_LOG" \
+        >/dev/null 2>&1 &
+    ZOYSH_STUB_PID=$!
+    local waited=0
+    until curl -fsS --max-time 1 "http://127.0.0.1:${ZOYSH_STUB_PORT}/v1/models" >/dev/null 2>&1; do
+        (( waited++ > 40 )) && { print -u2 "stub server failed to start"; exit 1 }
+        sleep 0.1
+    done
+}
+
+zoysh_stub_stop() {
+    [[ -n "$ZOYSH_STUB_PID" ]] && kill "$ZOYSH_STUB_PID" 2>/dev/null
+    wait "$ZOYSH_STUB_PID" 2>/dev/null
+    ZOYSH_STUB_PID=""
+}
+
+zoysh_stub_write_config() {
+    printf 'provider local\nbase_url http://127.0.0.1:%s/v1\nkey local\n' "$ZOYSH_STUB_PORT" > "$1"
+}
+
 fail() {
     print -u2 -r -- "not ok - $1"
     (( TESTS_FAILED++ ))
@@ -205,7 +235,7 @@ unfunction curl
 tmp_config="$(mktemp "${TMPDIR:-/tmp}/zoysh-test.XXXXXX")" || exit 1
 tmp_home="$(mktemp -d "${TMPDIR:-/tmp}/zoysh-home.XXXXXX")" || exit 1
 tmp_stderr="$tmp_home/stderr"
-trap 'rm -f -- "$tmp_config" "$tmp_home/.qwenkey" "$tmp_home/.openrouterkey" "$tmp_stderr"; rmdir -- "$tmp_home" 2>/dev/null' EXIT
+trap 'zoysh_stub_stop; rm -f -- "$tmp_config" "$tmp_home/.qwenkey" "$tmp_home/.openrouterkey" "$tmp_stderr" "$ZOYSH_STUB_LOG"; rmdir -- "$tmp_home" 2>/dev/null' EXIT
 printf '%s\n' \
     $'provider\tOPENAI' \
     'model release-model # comment' \
@@ -272,6 +302,7 @@ rendered="$(printf '%s' $'## Example\n\n**Matrix A:** $Ax = B$\n- first\n1 * -1\
 assert_eq $'<b>Example</b>\n\n<b>Matrix A:</b> <code>Ax = B</code>\n• first\n1 * -1\n<code>┌─ zsh</code>\n<code>│ print hi</code>\n<code>└─</code>' "$rendered" "markdown renderer formats terminal output"
 
 printf '%s\n' 'file-key' > "$tmp_home/.qwenkey"
+unset ZAI_API_KEY OPENROUTER_API_KEY
 ZOYSH_PROVIDER=qwen
 ZOYSH_API_KEY=local
 HOME="$tmp_home"
@@ -301,6 +332,8 @@ _zoysh_resolve_key
 assert_eq "env-key" "$ZOYSH_API_KEY" "OpenRouter loads its conventional environment key"
 unset OPENROUTER_API_KEY
 
+_zoysh_real_call_llm="${functions[_zoysh_call_llm]}"
+_zoysh_real_prepare_backend="${functions[_zoysh_prepare_backend]}"
 _zoysh_call_llm() {
     print -r -- '{"choices":[{"message":{"content":"{\"type\":\"chat\",\"response\":\"quiet response\"}"}}]}'
 }
@@ -314,6 +347,25 @@ assert_eq "" "$stderr_output" "requests do not create spinner job output"
 help_output="$(yo --help)"
 [[ "$help_output" == *"A zsh port of Yosh by Fil Pizlo"* ]] && help_credits=1 || help_credits=0
 assert_eq "1" "$help_credits" "help credits Yosh and Fil Pizlo"
+
+# ── End-to-end stub tests ────────────────────────────────────────────────────
+
+functions[_zoysh_call_llm]="$_zoysh_real_call_llm"
+functions[_zoysh_prepare_backend]="$_zoysh_real_prepare_backend"
+
+zoysh_stub_start plain
+zoysh_stub_write_config "$tmp_config"
+ZOYSH_CONF="$tmp_config"
+stub_answer="$(yo -c "greet me" 2>/dev/null)"
+[[ "$stub_answer" == *"Hello from the stub."* ]] && stub_ok=1 || stub_ok=0
+assert_eq "1" "$stub_ok" "stub chat answer reaches the user end to end"
+_zoysh_reload_config
+_zoysh_prepare_backend
+assert_eq "stub-model" "$ZOYSH_MODEL" "stub models endpoint feeds local model detection"
+stub_requests="$(grep -c chat/completions "$ZOYSH_STUB_LOG")"
+assert_eq "1" "$stub_requests" "stub records the completion request"
+zoysh_stub_stop
+ZOYSH_CONF=/dev/null
 
 print -r -- "1..${TESTS_RUN}"
 if (( TESTS_FAILED )); then
