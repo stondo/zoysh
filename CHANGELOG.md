@@ -6,6 +6,16 @@ All notable changes to Zoysh are documented here. The project follows [Semantic 
 
 ### Added
 
+- Stream responses over SSE with per-provider delta decoding (Chat
+  Completions, Anthropic Messages, OpenAI Responses). Chat answers print
+  progressively, then the streamed text is replaced by the rendered Markdown,
+  byte-identical to the non-streaming output. Thinking models stream with
+  `<think>` blocks hidden, including tags split across chunk boundaries.
+- Add the `streaming` config directive (default `1`); set `streaming 0` for
+  the previous single blocking request. Non-SSE responses, including provider
+  errors, fall back to the blocking path automatically.
+- In streaming mode the `timeout` directive now applies per chunk (idle
+  timeout) instead of capping the whole request.
 - Add `tests/stub_server.py`, a stdlib-only OpenAI-compatible stub server
   with canned streaming and non-streaming scripts, plus end-to-end tests
   against it, so CI covers network behavior without a model backend.

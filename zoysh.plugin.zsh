@@ -58,6 +58,7 @@ typeset -gr _ZOYSH_DEFAULT_HISTORY_LIMIT="${ZOYSH_HISTORY_LIMIT:-10}"
 typeset -gr _ZOYSH_DEFAULT_TOKEN_BUDGET="${ZOYSH_TOKEN_BUDGET:-4096}"
 typeset -gr _ZOYSH_DEFAULT_MAX_OUTPUT_TOKENS="${ZOYSH_MAX_OUTPUT_TOKENS:-4096}"
 typeset -gr _ZOYSH_DEFAULT_TIMEOUT="${ZOYSH_TIMEOUT:-30}"
+typeset -gr _ZOYSH_DEFAULT_STREAMING="${ZOYSH_STREAMING:-1}"
 typeset -gr _ZOYSH_DEFAULT_SERVER_WEB="${ZOYSH_SERVER_WEB:-1}"
 typeset -gr _ZOYSH_DEFAULT_CHAT_PREFIX=${ZOYSH_CHAT_PREFIX:-$'\033[1;36myo\033[0m\n'}
 typeset -gr _ZOYSH_DEFAULT_COLOR_PREFIX=${ZOYSH_COLOR_PREFIX:-$'\033[0m'}
@@ -84,6 +85,7 @@ typeset -g ZOYSH_HISTORY_LIMIT
 typeset -g ZOYSH_TOKEN_BUDGET
 typeset -g ZOYSH_MAX_OUTPUT_TOKENS
 typeset -g ZOYSH_TIMEOUT
+typeset -g ZOYSH_STREAMING
 typeset -g ZOYSH_SERVER_WEB
 typeset -g ZOYSH_CHAT_PREFIX
 typeset -g ZOYSH_COLOR_PREFIX
@@ -99,6 +101,8 @@ typeset -g ZOYSH_SCROLLBACK_ENABLED=0
 typeset -g ZOYSH_SCROLLBACK_BYTES=1048576
 typeset -g ZOYSH_SCROLLBACK_LINES=1000
 typeset -g _ZOYSH_BACKEND_ERROR=""
+typeset -g _ZOYSH_STREAM_ERROR=""
+typeset -g _ZOYSH_RAW_RESPONSE=""
 typeset -gi _ZOYSH_SCROLLBACK_WARNED=0
 typeset -gi _ZOYSH_MODEL_EXPLICIT=0
 
@@ -112,6 +116,7 @@ _zoysh_reset_config() {
     ZOYSH_TOKEN_BUDGET="$_ZOYSH_DEFAULT_TOKEN_BUDGET"
     ZOYSH_MAX_OUTPUT_TOKENS="$_ZOYSH_DEFAULT_MAX_OUTPUT_TOKENS"
     ZOYSH_TIMEOUT="$_ZOYSH_DEFAULT_TIMEOUT"
+    ZOYSH_STREAMING="$_ZOYSH_DEFAULT_STREAMING"
     ZOYSH_SERVER_WEB="$_ZOYSH_DEFAULT_SERVER_WEB"
     ZOYSH_CHAT_PREFIX="$_ZOYSH_DEFAULT_CHAT_PREFIX"
     ZOYSH_COLOR_PREFIX="$_ZOYSH_DEFAULT_COLOR_PREFIX"
@@ -159,6 +164,7 @@ _zoysh_load_config() {
             token_budget)  ZOYSH_TOKEN_BUDGET="$val" ;;
             max_output_tokens) ZOYSH_MAX_OUTPUT_TOKENS="$val" ;;
             timeout)       ZOYSH_TIMEOUT="$val" ;;
+            streaming)     ZOYSH_STREAMING="$val" ;;
             server_web)    ZOYSH_SERVER_WEB="$val" ;;
             scrollback_enabled) ZOYSH_SCROLLBACK_ENABLED="$val" ;;
             scrollback_bytes)   ZOYSH_SCROLLBACK_BYTES="$val" ;;
@@ -211,6 +217,10 @@ _zoysh_validate_config() {
     if [[ "$ZOYSH_TIMEOUT" != <-> ]] || (( ZOYSH_TIMEOUT < 1 || ZOYSH_TIMEOUT > 600 )); then
         printf 'zoysh: invalid timeout; using 30\n' >&2
         ZOYSH_TIMEOUT=30
+    fi
+    if [[ "$ZOYSH_STREAMING" != 0 && "$ZOYSH_STREAMING" != 1 ]]; then
+        printf 'zoysh: invalid streaming; using 1\n' >&2
+        ZOYSH_STREAMING=1
     fi
     if [[ "$ZOYSH_SERVER_WEB" != 0 && "$ZOYSH_SERVER_WEB" != 1 ]]; then
         printf 'zoysh: invalid server_web; using 1\n' >&2
@@ -447,7 +457,7 @@ _zoysh_history_clear() {
 # ─── LLM Call ────────────────────────────────────────────────────────────────
 
 _zoysh_build_request() {
-    local sys_prompt="$1" query="$2" i
+    local sys_prompt="$1" query="$2" stream="${3:-0}" i
     {
         printf '%s\0%s\0' "$sys_prompt" "$query"
         for (( i = 1; i <= ${#ZOYSH_HISTORY_QUERIES[@]}; i++ )); do
@@ -457,7 +467,8 @@ _zoysh_build_request() {
                 "${ZOYSH_HISTORY_RESPONSES[$i]}"
         done
     } | ZPROV="$ZOYSH_PROVIDER" ZMOD="$ZOYSH_MODEL" \
-        ZMAX="$ZOYSH_MAX_OUTPUT_TOKENS" ZWEB="$ZOYSH_SERVER_WEB" python3 -c '
+        ZMAX="$ZOYSH_MAX_OUTPUT_TOKENS" ZWEB="$ZOYSH_SERVER_WEB" \
+        ZSTREAM="${stream:-0}" python3 -c '
 import json, os, sys
 
 parts = sys.stdin.buffer.read().split(b"\0")
@@ -513,6 +524,9 @@ else:
         "max_tokens": max_output_tokens,
         "temperature": 0.3,
     }
+
+if os.environ.get("ZSTREAM") == "1":
+    body["stream"] = True
 
 print(json.dumps(body, ensure_ascii=False, separators=(",", ":")))
 '
@@ -595,6 +609,396 @@ _zoysh_call_llm() {
     fi
 
     print -r -- "$response"
+}
+
+# ─── Streaming LLM Call ──────────────────────────────────────────────────────
+#
+# The streaming helper runs curl, decodes provider SSE incrementally, and
+# writes NUL-terminated records to stdout for the zsh read loop:
+#   P<pid>         helper process id (for cancellation)
+#   D<text>        visible content delta (think blocks already suppressed)
+#   H              heartbeat, resets the idle timeout without display
+#   L<lines><US><col> terminal geometry occupied by the streamed deltas
+#   R<json>        synthesized full provider response, byte-compatible with
+#                  the non-streaming response so the shared parser applies
+#   S<code>        HTTP status (non-SSE fallback path)
+#   B<text>        raw body (non-SSE fallback path)
+#   E<text>        transport or provider error
+#   Z              end of stream
+
+typeset -gr _ZOYSH_STREAM_HELPER='
+import json, os, re, signal, subprocess, sys, tempfile, unicodedata
+
+def emit(kind, payload=""):
+    data = (kind + payload).encode("utf-8", "replace").replace(b"\x00", b"") + b"\x00"
+    os.write(1, data)
+
+emit("P", str(os.getpid()))
+
+provider = os.environ["ZPROV"]
+key = os.environ.get("ZKEY", "")
+cols = int(os.environ.get("ZCOLS") or 80)
+if cols < 10:
+    cols = 80
+endpoint = sys.argv[1]
+
+body = sys.stdin.buffer.read()
+
+if provider == "anthropic":
+    header_text = "x-api-key: " + key + "\nanthropic-version: 2023-06-01\n"
+    if os.environ.get("ZWEB") == "1":
+        header_text += "anthropic-beta: web-fetch-2025-09-10\n"
+else:
+    header_text = "Authorization: Bearer " + key + "\n"
+header_text = "Content-Type: application/json\n" + header_text
+
+hdr_fd, header_path = tempfile.mkstemp(prefix="zoysh-hdr-")
+os.close(hdr_fd)
+auth_r, auth_w = os.pipe()
+os.write(auth_w, header_text.encode("utf-8", "replace"))
+os.close(auth_w)
+
+argv = ["curl", "-sS", "--no-buffer", "--connect-timeout", "10",
+        "--user-agent", "zoysh/" + os.environ.get("ZVER", "0"),
+        "-D", header_path, endpoint,
+        "-H", "@/dev/fd/%d" % auth_r, "--data-binary", "@-"]
+
+p = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                     stderr=subprocess.PIPE, pass_fds=(auth_r,))
+
+def on_signal(signum, frame):
+    try:
+        p.kill()
+    except OSError:
+        pass
+    os._exit(129)
+
+signal.signal(signal.SIGTERM, on_signal)
+signal.signal(signal.SIGINT, on_signal)
+
+try:
+    p.stdin.write(body)
+    p.stdin.close()
+except OSError:
+    pass
+
+OPEN_TAG = "<think>"
+CLOSE_TAG = "</think>"
+unsafe = re.compile("[\x00-\x08\x0b-\x1f\x7f]")
+bidi = dict.fromkeys(map(ord, "\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"), None)
+
+def clean(text):
+    return unsafe.sub("", text).translate(bidi)
+
+think_state = "normal"
+carry = ""
+
+def suffix_overlap(text, tag):
+    limit = min(len(text), len(tag) - 1)
+    for size in range(limit, 0, -1):
+        if text.endswith(tag[:size]):
+            return size
+    return 0
+
+def feed(text):
+    global think_state, carry
+    buf = carry + text
+    carry = ""
+    out = []
+    i = 0
+    while i < len(buf):
+        if think_state == "normal":
+            j = buf.find(OPEN_TAG, i)
+            if j < 0:
+                keep = suffix_overlap(buf[i:], OPEN_TAG)
+                cut = len(buf) - keep
+                out.append(buf[i:cut])
+                carry = buf[cut:]
+                i = len(buf)
+            else:
+                out.append(buf[i:j])
+                i = j + len(OPEN_TAG)
+                think_state = "think"
+        else:
+            j = buf.find(CLOSE_TAG, i)
+            if j < 0:
+                keep = suffix_overlap(buf[i:], CLOSE_TAG)
+                cut = len(buf) - keep
+                carry = buf[cut:]
+                i = len(buf)
+            else:
+                i = j + len(CLOSE_TAG)
+                think_state = "normal"
+                k = i
+                while k < len(buf) and buf[k] in " \t\r\n":
+                    k += 1
+                i = k
+    return "".join(out)
+
+col = 0
+lines = 0
+
+def advance(text):
+    global col, lines
+    for ch in text:
+        if ch == "\n":
+            lines += 1
+            col = 0
+            continue
+        if ch == "\t":
+            col = (col // 8 + 1) * 8
+        else:
+            col += 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+        if col >= cols:
+            lines += 1
+            col = 0
+
+raw = ""
+finish = None
+stop_reason = None
+resp_status = None
+error_message = ""
+mode = None
+body_lines = []
+sse_lines = []
+
+while True:
+    raw_line = p.stdout.readline()
+    if not raw_line:
+        break
+    line = raw_line.decode("utf-8", "replace").rstrip("\r\n")
+    if mode == "body":
+        body_lines.append(line)
+        continue
+    if line == "" or line.startswith((": ", "event:", "retry:")):
+        if mode == "sse":
+            emit("H")
+        continue
+    if not line.startswith("data:"):
+        mode = "body"
+        body_lines.append(line)
+        continue
+    mode = "sse"
+    sse_lines.append(line)
+    payload = line[5:]
+    if payload.startswith(" "):
+        payload = payload[1:]
+    if payload == "[DONE]":
+        continue
+    try:
+        obj = json.loads(payload)
+    except ValueError:
+        emit("H")
+        continue
+    if not isinstance(obj, dict):
+        emit("H")
+        continue
+    text = None
+    if provider == "anthropic":
+        otype = obj.get("type")
+        if otype == "content_block_delta":
+            delta = obj.get("delta") or {}
+            if delta.get("type") == "text_delta":
+                text = delta.get("text")
+        elif otype == "message_delta":
+            stop_reason = (obj.get("delta") or {}).get("stop_reason") or stop_reason
+        elif otype == "error":
+            err = obj.get("error") or {}
+            error_message = "API error: " + str(err.get("message") or err)
+    elif provider == "openai":
+        otype = obj.get("type")
+        if otype == "response.output_text.delta":
+            text = obj.get("delta")
+        elif otype == "response.completed":
+            resp_status = "completed"
+        elif otype == "response.incomplete":
+            resp_status = "incomplete"
+        elif otype == "error" or "error" in obj:
+            err = obj.get("error") or {}
+            error_message = "API error: " + str(err.get("message") or err)
+    else:
+        try:
+            choice = obj["choices"][0]
+            delta = choice.get("delta") or {}
+            if isinstance(delta.get("content"), str):
+                text = delta["content"]
+            if choice.get("finish_reason"):
+                finish = choice["finish_reason"]
+            if obj.get("error"):
+                err = obj["error"]
+                if isinstance(err, dict):
+                    error_message = "API error: " + str(err.get("message") or err)
+                else:
+                    error_message = "API error: " + str(err)
+        except (KeyError, IndexError, TypeError):
+            pass
+    if error_message:
+        break
+    if isinstance(text, str) and text:
+        raw += text
+        visible = feed(clean(text))
+        if visible:
+            advance(visible)
+            emit("D", visible)
+    else:
+        emit("H")
+
+curl_rc = p.wait()
+try:
+    stderr_text = p.stderr.read().decode("utf-8", "replace")
+except OSError:
+    stderr_text = ""
+
+status = 0
+try:
+    with open(header_path, "r", encoding="utf-8", errors="replace") as handle:
+        for hline in handle:
+            if hline.startswith("HTTP/"):
+                parts = hline.split(None, 2)
+                if len(parts) >= 2:
+                    try:
+                        status = int(parts[1])
+                    except ValueError:
+                        pass
+except OSError:
+    pass
+
+os.close(auth_r)
+try:
+    os.unlink(header_path)
+except OSError:
+    pass
+
+if error_message:
+    emit("E", error_message)
+elif curl_rc != 0:
+    emit("E", "request failed (curl exit %d)" % curl_rc)
+elif mode is None or mode == "body":
+    emit("S", str(status))
+    emit("B", "\n".join(body_lines))
+elif status and not 200 <= status < 300:
+    emit("S", str(status))
+    emit("B", "\n".join(sse_lines))
+else:
+    if provider == "anthropic":
+        synth = {"content": [{"type": "text", "text": raw}],
+                 "stop_reason": stop_reason or "end_turn"}
+    elif provider == "openai":
+        synth = {"output": [{"type": "message",
+                             "content": [{"type": "output_text", "text": raw}]}],
+                 "status": resp_status or "completed"}
+    else:
+        synth = {"choices": [{"message": {"content": raw},
+                              "finish_reason": finish or "stop"}]}
+    emit("L", "%d\x1f%d" % (lines, col))
+    emit("R", json.dumps(synth, ensure_ascii=False, separators=(",", ":")))
+emit("Z")
+'
+
+_zoysh_stream_call() {
+    local display="$1" query="$2"
+    local endpoint sys_prompt request_body body_file rec type payload
+    local helper_pid="" raw="" http_status="" fallback_body="" error_message=""
+    local disp_lines=0 disp_col=0 visible=0 saw_end=0
+
+    _ZOYSH_STREAM_ERROR=""
+    endpoint="$(_zoysh_api_endpoint)"
+
+    if ! _zoysh_local_base_url >/dev/null &&
+       [[ -z "$ZOYSH_API_KEY" || "$ZOYSH_API_KEY" == "local" ]]; then
+        _ZOYSH_STREAM_ERROR="missing API key for provider ${ZOYSH_PROVIDER}"
+        return 1
+    fi
+
+    sys_prompt="$(_zoysh_build_system_prompt)"
+    request_body=$(_zoysh_build_request "$sys_prompt" "$query" 1) || {
+        _ZOYSH_STREAM_ERROR="failed to build API request"
+        return 1
+    }
+
+    [[ $ZOYSH_DEBUG -eq 1 ]] && printf 'DEBUG body: %.200s\n' "$request_body" >&2
+
+    body_file="$(mktemp "${TMPDIR:-/tmp}/zoysh-body.XXXXXX")"
+    printf '%s' "$request_body" > "$body_file"
+
+    local -i term_cols=${COLUMNS:-80}
+    (( term_cols < 10 )) && term_cols=80
+    local -i sfd
+    exec {sfd}< <(ZPROV="$ZOYSH_PROVIDER" ZKEY="$ZOYSH_API_KEY" \
+        ZWEB="$ZOYSH_SERVER_WEB" ZCOLS="$term_cols" ZVER="$ZOYSH_VERSION" \
+        python3 -c "$_ZOYSH_STREAM_HELPER" "$endpoint" < "$body_file")
+
+    while IFS= read -r -t "$ZOYSH_TIMEOUT" -d '' rec <&$sfd; do
+        type="${rec[1]}"
+        payload="${rec[2,-1]}"
+        case "$type" in
+            P) helper_pid="$payload" ;;
+            D)
+                if [[ "$display" == "chat" ]]; then
+                    printf '%s' "$payload"
+                    visible=1
+                fi
+                ;;
+            L)
+                disp_lines="${payload%%$'\x1f'*}"
+                disp_col="${payload#*$'\x1f'}"
+                ;;
+            R) raw="$payload" ;;
+            S) http_status="$payload" ;;
+            B) fallback_body+="$payload" ;;
+            E) error_message="$payload" ;;
+            Z) saw_end=1; break ;;
+        esac
+    done
+    exec {sfd}<&-
+    rm -f -- "$body_file"
+
+    if (( ! saw_end )); then
+        [[ -n "$helper_pid" ]] && kill "$helper_pid" 2>/dev/null
+        _ZOYSH_STREAM_ERROR="timed out after ${ZOYSH_TIMEOUT}s without a chunk from ${ZOYSH_PROVIDER}"
+        return 1
+    fi
+
+    if [[ -n "$error_message" ]]; then
+        _ZOYSH_STREAM_ERROR="$error_message"
+        return 1
+    fi
+
+    if [[ -n "$http_status" ]]; then
+        if [[ "$http_status" != 2[0-9][0-9] ]]; then
+            error_message=$(printf '%s' "$fallback_body" | _zoysh_http_error)
+            _ZOYSH_STREAM_ERROR="API request failed (HTTP ${http_status}): ${error_message}"
+            return 1
+        fi
+        if [[ -z "$fallback_body" ]]; then
+            _ZOYSH_STREAM_ERROR="API returned an empty response"
+            return 1
+        fi
+        _ZOYSH_RAW_RESPONSE="$fallback_body"
+        return 0
+    fi
+
+    if [[ "$display" == "chat" && "$visible" == 1 ]]; then
+        local -i occupied=$(( disp_lines + (disp_col > 0 ? 1 : 0) ))
+        local -i term_lines=${LINES:-24}
+        (( term_lines < 10 )) && term_lines=24
+        local -i erase_limit=$(( term_lines - 2 ))
+        if (( occupied <= erase_limit )); then
+            if (( disp_col > 0 )); then
+                printf '\r\033[K'
+            fi
+            local -i i
+            for (( i = 0; i < disp_lines; i++ )); do
+                printf '\033[A\033[2K'
+            done
+            printf '\r'
+        else
+            printf '\n'
+        fi
+    fi
+
+    _ZOYSH_RAW_RESPONSE="$raw"
+    return 0
 }
 
 # ─── Response Parsing ────────────────────────────────────────────────────────
@@ -803,7 +1207,7 @@ yo() {
         case "$1" in
             -c|--chat)  chat_mode=1; shift ;;
             -h|--help)
-                printf 'zoysh v%s — LLM-powered shell assistant\n\n' "$ZOYSH_VERSION"
+                printf 'zoysh v%s - LLM-powered shell assistant\n\n' "$ZOYSH_VERSION"
                 printf 'A zsh port of Yosh by Fil Pizlo: https://github.com/pizlonator/yosh\n\n'
                 printf 'Usage:\n'
                 printf '  yo <natural language>    Generate a shell command\n'
@@ -824,6 +1228,11 @@ yo() {
                 fi
                 printf 'History: %s exchanges / ~%s tokens\n' "$ZOYSH_HISTORY_LIMIT" "$ZOYSH_TOKEN_BUDGET"
                 printf 'Generation: %s tokens / %ss timeout\n' "$ZOYSH_MAX_OUTPUT_TOKENS" "$ZOYSH_TIMEOUT"
+                if (( ZOYSH_STREAMING )); then
+                    printf 'Streaming: enabled (idle timeout %ss per chunk)\n' "$ZOYSH_TIMEOUT"
+                else
+                    printf 'Streaming: disabled\n'
+                fi
                 if (( ZOYSH_SERVER_WEB )); then
                     printf 'Hosted web search: enabled (Anthropic/OpenAI only)\n'
                 else
@@ -849,12 +1258,21 @@ yo() {
     fi
 
     local response call_status
-    response=$(_zoysh_call_llm "$query")
-    call_status=$?
-
-    if (( call_status != 0 )) || [[ -z "$response" ]]; then
-        _zoysh_print_error "${response:-API call failed}"
-        return 1
+    if (( ZOYSH_STREAMING )); then
+        local stream_display=command
+        (( chat_mode )) && stream_display=chat
+        if ! _zoysh_stream_call "$stream_display" "$query"; then
+            _zoysh_print_error "$_ZOYSH_STREAM_ERROR"
+            return 1
+        fi
+        response="$_ZOYSH_RAW_RESPONSE"
+    else
+        response=$(_zoysh_call_llm "$query")
+        call_status=$?
+        if (( call_status != 0 )) || [[ -z "$response" ]]; then
+            _zoysh_print_error "${response:-API call failed}"
+            return 1
+        fi
     fi
 
     local parsed rtype rcontent rexplanation
