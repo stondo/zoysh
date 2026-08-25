@@ -671,6 +671,72 @@ zoysh_stub_stop
 rm -rf -- "$plan_state"
 ZOYSH_CONF=/dev/null
 
+# ── Scrollback capture tests ─────────────────────────────────────────────────
+
+sb_state="$(mktemp -d "${TMPDIR:-/tmp}/zoysh-sb.XXXXXX")"
+zoysh_stub_start planthenchat
+printf 'provider local\nbase_url http://127.0.0.1:%s/v1\nkey local\ncontinuation 1\nscrollback_enabled 1\nscrollback_bytes 4096\n' \
+    "$ZOYSH_STUB_PORT" > "$tmp_config"
+zpty -b zsb "env ZOYSH_CONF=$tmp_config ZOYSH_STATE_DIR=$sb_state HOME=$HOME PS1='ZSB> ' zsh -f -i"
+zpty -w -n zsb "stty rows 30 cols 100; source ${TEST_ROOT}/zoysh.plugin.zsh"$'\r'
+sleep 0.8
+zpty -r zsb junk >/dev/null
+zpty -w -n zsb "yo build the thing"$'\r'
+zoysh_zpty_wait zsb "zoysh-run echo known-output-marker" 15
+assert_eq "1" "$ZPTY_WAITED" "plan steps prefill wrapped in zoysh-run when capture is on"
+zpty -w -n zsb $'\r'
+zoysh_zpty_wait zsb "plan step 2/2" 15
+assert_eq "1" "$ZPTY_WAITED" "the wrapped step still advances the plan"
+[[ -f "$sb_state/scrollback" ]] && ring_present=1 || ring_present=0
+assert_eq "1" "$ring_present" "running the wrapped step creates the ring"
+[[ "$(<"$sb_state/scrollback")" == *"known-output-marker"* ]] && ring_out=1 || ring_out=0
+assert_eq "1" "$ring_out" "the ring holds the step output"
+zpty -w -n zsb $'\x15'
+sleep 0.3
+zpty -w -n zsb "yo -c 'what did the last command print'"$'\r'
+zoysh_zpty_wait zsb "known-output-marker" 15
+assert_eq "1" "$ZPTY_WAITED" "follow-up questions receive the canned answer"
+sb_in_request="$(python3 -c '
+import json, sys
+found = 0
+for line in open(sys.argv[1]):
+    try:
+        entry = json.loads(line)
+        body = json.loads(entry.get("body") or "{}")
+    except ValueError:
+        continue
+    text = json.dumps(body)
+    if "known-output-marker" in text and "chat/completions" in entry.get("path", ""):
+        found += 1
+print(found)
+' "$ZOYSH_STUB_LOG")"
+assert_eq "1" "$sb_in_request" "the captured output reaches the follow-up request context"
+zpty -d zsb
+zoysh_stub_stop
+
+ZOYSH_CONF=/dev/null
+ZOYSH_STATE_DIR="$sb_state"
+ZOYSH_SCROLLBACK_ENABLED=1
+rm -f -- "$sb_state/scrollback"
+ZOYSH_SCROLLBACK_BYTES=50
+zoysh-run "seq 1 40" >/dev/null
+ring_size=$(command stat -c %s -- "$sb_state/scrollback" 2>/dev/null)
+(( ring_size <= 50 )) && ring_capped=1 || ring_capped=0
+assert_eq "1" "$ring_capped" "the ring respects the byte cap (${ring_size} bytes)"
+[[ "$(<"$sb_state/scrollback")" == *"40"* ]] && ring_tail=1 || ring_tail=0
+assert_eq "1" "$ring_tail" "trimming keeps the most recent output"
+zoysh-run "false" >/dev/null
+false_status=$?
+assert_eq "1" "$false_status" "zoysh-run preserves the command exit status"
+
+ZOYSH_SCROLLBACK_ENABLED=0
+_ZOYSH_PLAN_CMDS=("echo raw-step")
+_ZOYSH_PLAN_QUERY="unit"
+_zoysh_plan_prefill 1 >/dev/null
+assert_eq "echo raw-step" "$_ZOYSH_PENDING_CMD" "capture off leaves plan steps unwrapped"
+ZOYSH_STATE_DIR=""
+rm -rf -- "$sb_state"
+
 print -r -- "1..${TESTS_RUN}"
 if (( TESTS_FAILED )); then
     print -u2 -r -- "${TESTS_FAILED} test(s) failed"
