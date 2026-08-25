@@ -362,7 +362,8 @@ zsh source tree plus libcurl headers, for example:
 
 ```sh
 git clone --depth 1 --branch zsh-5.9 https://github.com/zsh-users/zsh ~/src/zsh
-cd ~/src/zsh && ./Util/preconfig && ./configure --enable-multibyte && make -C Src zsh.mdh
+cd ~/src/zsh && ./Util/preconfig && ./configure --enable-multibyte
+make -C ~/src/zsh/Src Makemod && make -C ~/src/zsh/Src -f Makemod zsh.mdh
 make module ZSH_SRC=~/src/zsh          # builds zoysh.so
 make check-module ZSH_SRC=~/src/zsh    # gated module tests (ZMODULE=1)
 ```

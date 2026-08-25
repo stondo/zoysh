@@ -58,9 +58,11 @@ jobs:
           cd "$HOME/zsh-src"
           ./Util/preconfig
           # zsh's configure probes terminal capabilities and fails with
-          # "no controlling tty" in CI; script(1) lends it a pty.
+          # "no controlling tty" in CI; script(1) lends it a pty. The
+          # zsh.mdh rule lives in the generated Makemod, not Src/Makefile.
           script -qec "./configure --enable-multibyte --with-term-lib=ncursesw" /dev/null
-          make -j"$(nproc)" -C Src zsh.mdh
+          make -j"$(nproc)" -C Src Makemod
+          make -C Src -f Makemod zsh.mdh
 
       - name: Build the module
         run: make module ZSH_SRC="$HOME/zsh-src"

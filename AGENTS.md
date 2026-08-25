@@ -101,3 +101,37 @@ zsh -f -i -c 'source zoysh.plugin.zsh; yo list all python files'
 - GPL-3.0-only license, selected for compatibility with Yosh's GPL-3.0-or-later source
 - The current release does not bundle Bash, Readline, or cJSON
 - cJSON is MIT licensed if it is added to the planned native module
+
+<!-- cairnkeep:playbook:v1:start -->
+## Cairnkeep Durable Context
+
+At the start of a nontrivial task that may depend on existing project
+decisions, conventions, constraints, recurring failures, or prior work,
+make this retrieval the first tool or command. Do not run repository location,
+inventory, or search commands such as `pwd`, `ls`, `rg --files`, `find`,
+`tree`, or broad text searches first:
+
+- If `memory_search` is available, derive one short query from the task and
+  search `scope: project` once. Derive it from the user's task; do not inspect
+  the repository first merely to formulate the query.
+- Treat returned memory as a locator, not authority. Read and verify the
+  maintained repository sources it references before implementing a result.
+- If the tool is unavailable or no relevant result exists, continue with
+  ordinary repository inspection. Do not repeat or broaden searches merely to
+  force a result.
+- Do not write, supersede, or approve durable memory unless the user or an
+  applicable reviewed workflow explicitly requests capture.
+
+## Cairnkeep Playbooks
+
+Use Cairnkeep's bounded playbook policy to select workflow steps. It advises or
+enforces existing capabilities; it does not execute a workflow for you.
+
+- At task start, run `cairn playbook check start --session SESSION --complexity trivial|standard|complex --familiarity known|mixed|unfamiliar` with one value from each bounded set, and follow every applicable `must` action. Apply `should` actions unless there is a concrete reason to skip them; use judgment for `may` actions.
+- Re-run `cairn playbook check check` when scope, familiarity, complexity, or risk changes materially.
+- Before claiming completion, run `cairn playbook check finish --session SESSION --changed PATH... --risk low|normal|high|security --public-change --completed ACTION... --skipped ACTION=REASON... --enforce` with one bounded risk value and accurate signals and evidence.
+- A non-zero enforcement result means applicable `must` evidence is missing. Perform the action and check again; do not relabel a skipped or failed action as completed.
+- After a successful finish check, record only material outcomes with `cairn playbook record --policy POLICY_DIGEST --decision DECISION_DIGEST --event finish --action ACTION --outcome OUTCOME --session SESSION [--reason REASON]`, using one call per recorded action and the exact digests returned by the check. Run `cairn playbook record --help` for the bounded values. Actor identity is an unverified local assertion in this release.
+- Existing approval and capability boundaries still apply. A playbook cannot enable a disabled capability, grant approval, write durable memory automatically, run arbitrary commands, or authorize destructive work.
+- If the CLI or an applicable capability is unavailable, state that limitation and follow the policy intent manually; never invent a receipt or successful result.
+<!-- cairnkeep:playbook:v1:end -->
