@@ -87,6 +87,12 @@ SCRIPTS = {
     "lastcmd": [
         '{"type":"chat","response":"the last command printed known-output-marker"}',
     ],
+    # First completion answers with a two-step plan; every later completion
+    # is a canned chat answer, so context-injection tests can drive both
+    # phases against one server.
+    "planthenchat": [
+        "Two-step plan\n```zoysh:plan\necho known-output-marker\necho done\n```",
+    ],
     "truncated": [
         '{"type":"command","command":"echo neve',
     ],
@@ -181,6 +187,10 @@ class StubHandler(BaseHTTPRequestHandler):
     # ── provider shapes ────────────────────────────────────────────────────
 
     def _chunks(self):
+        if self.script == "planthenchat":
+            self.server.plan_served = getattr(self.server, "plan_served", 0) + 1
+            if self.server.plan_served > 1:
+                return SCRIPTS["lastcmd"]
         return SCRIPTS[self.script]
 
     def _delay(self):

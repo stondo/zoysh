@@ -6,6 +6,15 @@ All notable changes to Zoysh are documented here. The project follows [Semantic 
 
 ### Added
 
+- Add opt-in scrollback capture for plan steps. The design decision is
+  recorded in doc/pty-design.md before implementation: zpty-hosting and a
+  fork/exec PTY pair were both rejected for v1 (they amount to writing a
+  terminal multiplexer), so with scrollback_enabled 1 plan steps prefill
+  as `zoysh-run <command>`: a wrapper that tees the command and its
+  output into a ring bounded by scrollback_bytes, preserves the exit
+  status, and injects the ring into the context of later yo calls.
+  Ambient whole-terminal capture stays a Yosh-only feature and the README
+  says so; capture is off by default with zero hooks while disabled.
 - Add the experimental native module scaffold with the first ported
   subsystems: lifecycle with clean unload, a C port of the ~/.yoconf
   parser surfaced through `zoysh-status`, and a curl-based streaming

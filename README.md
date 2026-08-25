@@ -94,6 +94,9 @@ server_web 1
 | `timeout` | `30` | Seconds to wait for a connection or, when streaming, for the next chunk |
 | `streaming` | `1` | Stream responses over SSE; `0` sends one blocking request |
 | `continuation` | `0` | Multi-step plans: one `yo` query may queue several commands, prefilled one at a time |
+| `scrollback_enabled` | `0` | Capture plan-step commands and output into a context ring (see below) |
+| `scrollback_bytes` | `1048576` | Maximum size of the scrollback ring |
+| `scrollback_lines` | `1000` | Recognized for compatibility; the script ring is byte-bounded |
 | `server_web` | `1` | Enable hosted web search for Anthropic Messages and OpenAI Responses |
 | `chat_prefix` | cyan `yo` heading | Text printed before chat responses |
 | `color_prefix` | terminal reset | Base chat text style |
@@ -132,7 +135,17 @@ disable_strikethrough ""
 code_delimiter ""
 ```
 
-Yosh's `scrollback_enabled`, `scrollback_bytes`, and `scrollback_lines` directives are recognized for forward compatibility. The script plugin defaults scrollback capture to disabled and warns if it is enabled: capturing arbitrary child-process output requires the planned PTY-backed native module.
+Yosh's `scrollback_enabled`, `scrollback_bytes`, and `scrollback_lines`
+directives are supported with a zsh-specific v1 design: capture is opt-in,
+covers the commands zoysh itself queues, and does not wrap your whole
+terminal. With `scrollback_enabled 1`, plan steps are prefilled as
+`zoysh-run <command>`; the wrapper tees the command and its output into a
+ring under `${XDG_STATE_HOME:-~/.local/state}/zoysh/scrollback` (bounded by
+`scrollback_bytes`), preserves the exit status, and later `yo` calls include
+the ring as context. You can also wrap any command yourself with
+`zoysh-run <command>`. Ambient whole-terminal scrollback remains a
+Yosh-only feature; the design notes in `doc/pty-design.md` explain why and
+what a Phase 2 port would take.
 
 If `~/.yoconf` doesn't exist, zoysh uses the local OpenAI-compatible API at `http://127.0.0.1:8001/v1/`. Before each request it reads `/models`, keeps the configured model if available, or selects the first model reported by the server. If the server is unavailable or has no loaded model, `yo` explains what to start or load.
 
@@ -254,6 +267,8 @@ The query, current directory, operating system, zsh version, git branch, and bou
 
 When `server_web 1` is used with Anthropic or OpenAI, the provider may send search queries to its web-search service. Set `server_web 0` to prevent zoysh from enabling those tools.
 
+When `scrollback_enabled 1` is set, commands run through `zoysh-run` (plan steps, by default) have their output stored in the local ring and sent to the configured API as context of later `yo` calls. Keep capture off if you work with secrets on screen.
+
 Generated commands are untrusted model output. Zoysh only prefills the prompt; review every command before pressing Enter, especially commands that modify files, permissions, packages, or remote systems. Prefilled text is placed in the editor buffer through a `zle-line-init` hook, so nothing executes until you accept the visible line.
 
 ## Release status and roadmap
@@ -277,6 +292,7 @@ Streaming responses are now part of Phase 1:
 - [x] Ctrl-C cancellation
 - [x] ZLE widget (script implementation; the C module port remains Phase 2)
 - [x] Multi-step task continuation (script implementation)
+- [x] Scrollback capture for plan steps (script implementation; ambient capture remains Phase 2, see `doc/pty-design.md`)
 
 Session memory includes earlier `yo` exchanges. Arbitrary terminal-output capture remains a Phase 2 feature because it requires a PTY proxy.
 
@@ -288,7 +304,7 @@ The first native subsystems have landed behind an opt-in switch:
 - [x] API client: curl streaming with the same record protocol as the python helper
 - [x] Script bridge: `zstyle ':zoysh:engine' engine module` (default stays `script`)
 - [x] Ctrl-C cancellation preserved through the bridge
-- [ ] Full `yo.c` port (session memory, PTY proxy, ZLE integration in C)
+- [ ] Full `yo.c` port (session memory, ambient PTY scrollback per `doc/pty-design.md`, ZLE integration in C)
 
 Build it against a configured zsh source tree (see the Development section);
 `make check` never requires the module, and the CI module job is

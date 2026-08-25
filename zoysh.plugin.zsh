@@ -255,7 +255,7 @@ _zoysh_validate_config() {
         ZOYSH_SCROLLBACK_LINES=1000
     fi
     if (( ZOYSH_SCROLLBACK_ENABLED && ! _ZOYSH_SCROLLBACK_WARNED )); then
-        printf 'zoysh: scrollback capture requires the planned native module and is unavailable in the script plugin\n' >&2
+        printf 'zoysh: scrollback capture wraps plan steps in zoysh-run and sends captured output to the configured API; see doc/pty-design.md\n' >&2
         _ZOYSH_SCROLLBACK_WARNED=1
     fi
 }
@@ -1339,6 +1339,59 @@ _zoysh_print_command() {
     [[ -n "$2" ]] && printf '\033[90m↳ %s\033[0m\n' "$2"
 }
 
+# ─── Scrollback Ring ─────────────────────────────────────────────────────────
+#
+# v1 capture, per doc/pty-design.md: plan steps prefilled while
+# scrollback_enabled 1 are wrapped in zoysh-run, which tees the command and
+# its output into a bounded ring; later yo calls carry the ring as context.
+# Ambient whole-terminal capture stays a Yosh-only feature.
+
+_zoysh_ring_file() {
+    print -r -- "${ZOYSH_STATE_DIR:-${XDG_STATE_HOME:-${HOME}/.local/state}/zoysh}/scrollback"
+}
+
+_zoysh_ring_trim() {
+    local ring size
+    ring=$(_zoysh_ring_file)
+    [[ -f "$ring" ]] || return 0
+    size=$(command stat -c %s -- "$ring" 2>/dev/null) || return 0
+    if (( size > ZOYSH_SCROLLBACK_BYTES )); then
+        local trimmed
+        trimmed="$(mktemp "${TMPDIR:-/tmp}/zoysh-ring.XXXXXX")" || return 0
+        command tail -c "$ZOYSH_SCROLLBACK_BYTES" -- "$ring" > "$trimmed" 2>/dev/null && \
+            command mv -f -- "$trimmed" "$ring" || command rm -f -- "$trimmed"
+    fi
+}
+
+# Run one command, teeing it and its output into the scrollback ring while
+# keeping the command's exit status. Used for plan steps when scrollback
+# capture is enabled; users can wrap any command manually.
+zoysh-run() {
+    local ring
+    ring=$(_zoysh_ring_file)
+    mkdir -p -- "${ring:h}"
+    printf '$ %s\n' "$*" >> "$ring"
+    {
+        eval "$@"
+    } 2>&1 | command tee -a -- "$ring"
+    # Capture pipestatus before any other statement; even a local
+    # declaration resets it.
+    _ZOYSH_RUN_STATUS=$pipestatus[1]
+    _zoysh_ring_trim
+    return ${_ZOYSH_RUN_STATUS}
+}
+
+_zoysh_scrollback_context() {
+    (( ZOYSH_SCROLLBACK_ENABLED )) || return 0
+    local ring
+    ring=$(_zoysh_ring_file)
+    [[ -s "$ring" ]] || return 0
+    print -r -- "
+
+(Recent commands and output captured from zoysh plan steps:)
+$(<"$ring")"
+}
+
 # ─── Multi-step Plans ────────────────────────────────────────────────────────
 #
 # When continuation is enabled the model may answer with a fenced
@@ -1398,6 +1451,11 @@ _zoysh_plan_save() {
 _zoysh_plan_prefill() {
     local step="$1"
     local cmd="${_ZOYSH_PLAN_CMDS[step]}"
+    if (( ZOYSH_SCROLLBACK_ENABLED )); then
+        # Scrollback capture wraps the step so its output reaches the ring;
+        # the wrap stays visible in the buffer for review before Enter.
+        cmd="zoysh-run ${cmd}"
+    fi
     if (( _ZOYSH_ZLE_MODE )); then
         _ZOYSH_LAST_COMMAND="$cmd"
     else
@@ -1459,7 +1517,9 @@ _zoysh_plan_precmd() {
     local last="${_ZOYSH_PLAN_LAST_EXEC}"
     last="${last#"${last%%[![:space:]]*}"}"
     last="${last%"${last##*[![:space:]]}"}"
-    if [[ "$last" == "${_ZOYSH_PLAN_CMDS[_ZOYSH_PLAN_STEP]}" ]]; then
+    local expected="${_ZOYSH_PLAN_CMDS[_ZOYSH_PLAN_STEP]}"
+    (( ZOYSH_SCROLLBACK_ENABLED )) && expected="zoysh-run ${expected}"
+    if [[ "$last" == "$expected" ]]; then
         _zoysh_plan_advance
     else
         command rm -f -- "$(_zoysh_plan_file)"
@@ -1553,6 +1613,9 @@ yo() {
         plan_context=$(_zoysh_plan_context)
         [[ -n "$plan_context" ]] && query+="$plan_context"
     fi
+    local scrollback_context
+    scrollback_context=$(_zoysh_scrollback_context)
+    [[ -n "$scrollback_context" ]] && query+="$scrollback_context"
 
     _zoysh_trap_install
     if ! _zoysh_prepare_backend; then
