@@ -762,3 +762,16 @@ if (( TESTS_FAILED )); then
     exit 1
 fi
 print -r -- "All ${TESTS_RUN} tests passed"
+
+# Regression: namespaced previous zle-line-init widget must chain, not error.
+# v0.4.0 stored "user:zle-line-init" verbatim and tried to execute it as a
+# command, spewing "command not found" on every prompt draw.
+_test_prev_hook_ran=0
+zle-line-init() { _test_prev_hook_ran=1 }
+zle -N zle-line-init
+_zoysh_register_prefill
+assert_eq "zle-line-init" "${_ZOYSH_LINE_INIT_PREV_FUNC}" "namespaced previous widget resolved to bare function name"
+_zoysh_line_init 2>/dev/null
+assert_eq "1" "$_test_prev_hook_ran" "previous zle-line-init hook still runs"
+unset _test_prev_hook_ran
+unfunction zle-line-init

@@ -44,7 +44,7 @@ fi
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
-typeset -g ZOYSH_VERSION="0.4.0"
+typeset -g ZOYSH_VERSION="0.4.1"
 typeset -g ZOYSH_CONF="${ZOYSH_CONF:-${HOME}/.yoconf}"
 typeset -gi ZOYSH_DEBUG=0
 
@@ -1793,19 +1793,27 @@ _zoysh_line_init() {
         CURSOR=${#BUFFER}
         _ZOYSH_PENDING_CMD=""
     fi
-    if [[ -n "$_ZOYSH_LINE_INIT_PREV_FUNC" ]]; then
+    if [[ -n "$_ZOYSH_LINE_INIT_PREV_FUNC" ]] &&
+       (( ${+functions[$_ZOYSH_LINE_INIT_PREV_FUNC]} )); then
         "${_ZOYSH_LINE_INIT_PREV_FUNC}" "$@"
     fi
     return 0
 }
 
 _zoysh_register_prefill() {
+    # Chain to a previous zle-line-init widget, if any. widgets[...] reports
+    # namespaced references like "user:widget" or "builtin:zle-line-init";
+    # strip the namespace before storing, never chain to ourselves, and
+    # tolerate a missing widget at call time (zstyles can unload things).
     if (( ${+widgets[zle-line-init]} )); then
         local previous="${widgets[zle-line-init]}"
         local -a words
         words=("${(z)previous}")
-        [[ "${words[1]}" == builtin:* || "${words[1]}" == completion:* ]] ||
-            _ZOYSH_LINE_INIT_PREV_FUNC="${words[1]}"
+        local prev_fn="${words[1]#*:}"
+        if [[ -n "$prev_fn" && "$prev_fn" != _zoysh_line_init ]] &&
+           (( ${+functions[$prev_fn]} )); then
+            _ZOYSH_LINE_INIT_PREV_FUNC="$prev_fn"
+        fi
     fi
     zle -N zle-line-init _zoysh_line_init
 }
