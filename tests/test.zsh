@@ -529,13 +529,21 @@ zpty -w zcancel2 "stty rows 30 cols 100; source ${TEST_ROOT}/zoysh.plugin.zsh"$'
 sleep 0.8
 zpty -r zcancel2 junk >/dev/null
 zpty -w zcancel2 "yo -c 'slow one'"$'\r'
+# First make sure the inner shell accepted the line, then wait for the stub
+# to log the completion. Slow CI runners need generous cold-start slack.
+zpty_cancel2_cap=""
+zoysh_zpty_wait zcancel2 "slow one" 15
 blocking_started=0
-# Slow CI runners (macos) can need several seconds of cold start before the
-# request even reaches the stub; poll generously since early exit is cheap.
-for (( i = 0; i < 150; i++ )); do
+for (( i = 0; i < 200; i++ )); do
+    zpty -r zcancel2 cchunk 2>/dev/null
+    zpty_cancel2_cap="${zpty_cancel2_cap}${cchunk}"
     grep -q "chat/completions" "$ZOYSH_STUB_LOG" 2>/dev/null && { blocking_started=1; break }
-    sleep 0.2
+    sleep 0.3
 done
+if (( ! blocking_started )); then
+    print -u2 -r -- "DIAG zcancel2 pty capture: ${zpty_cancel2_cap}"
+    print -u2 -r -- "DIAG stub log: $(tail -3 "$ZOYSH_STUB_LOG" 2>/dev/null)"
+fi
 assert_eq "1" "$blocking_started" "blocking request is in flight before Ctrl-C"
 zpty -w -n zcancel2 $'\x03'
 zoysh_zpty_wait zcancel2 "yo: cancelled" 30

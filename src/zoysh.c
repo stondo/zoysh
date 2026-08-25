@@ -287,9 +287,9 @@ typedef struct zoysh_stream {
 
     char think_state;          /* 'n' normal, 't' think */
     char carry[16];
-    int lines;
-    int col;
-    int cols;
+    int wrap_rows;
+    int wrap_col;
+    int wrap_width;
     int visible;
 
     char *raw;
@@ -425,19 +425,19 @@ zoysh_advance(zoysh_stream_t *stream, const char *text)
         int width;
 
         if (*cursor == '\n') {
-            stream->lines++;
-            stream->col = 0;
+            stream->wrap_rows++;
+            stream->wrap_col = 0;
             cursor++;
             continue;
         }
         width = zoysh_char_width(cursor, &used);
         if (*cursor == '\t')
-            stream->col = (stream->col / 8 + 1) * 8;
+            stream->wrap_col = (stream->wrap_col / 8 + 1) * 8;
         else
-            stream->col += width;
-        if (stream->col >= stream->cols) {
-            stream->lines++;
-            stream->col = 0;
+            stream->wrap_col += width;
+        if (stream->wrap_col >= stream->wrap_width) {
+            stream->wrap_rows++;
+            stream->wrap_col = 0;
         }
         cursor += used;
     }
@@ -833,7 +833,7 @@ zoysh_finalize(zoysh_stream_t *stream, CURLcode code)
         return;
     }
     synth = zoysh_synthesize(stream);
-    snprintf(record, sizeof(record), "%d\x1f%d", stream->lines, stream->col);
+    snprintf(record, sizeof(record), "%d\x1f%d", stream->wrap_rows, stream->wrap_col);
     zoysh_emit('L', record);
     if (synth) {
         printed = cJSON_PrintUnformatted(synth);
@@ -879,10 +879,10 @@ bin_zoysh_call(char *name, char **argv, UNUSED(Options ops), UNUSED(int func))
     zoysh_config_defaults(&stream->config);
     zoysh_config_load(&stream->config);
     strlcpy(endpoint, argv[0], sizeof(endpoint));
-    stream->cols = 80;
+    stream->wrap_width = 80;
     env = getenv("COLUMNS");
     if (env && atoi(env) >= 10)
-        stream->cols = atoi(env);
+        stream->wrap_width = atoi(env);
     stream->think_state = 'n';
 
     snprintf(pidbuf, sizeof(pidbuf), "%ld", (long) getpid());
