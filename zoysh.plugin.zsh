@@ -1834,7 +1834,12 @@ _zoysh_maybe_selfupdate() {
         return 0
     fi
     date +%s > "$stamp"
-    ( cd "$ZSH_CUSTOM/plugins/zoysh" && git fetch -q origin main &&       [[ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]] &&       git pull -q origin main ) &!
+    # 10s hard cap, never blocks or breaks the prompt: network-less or
+    # sandboxed environments (CI) just skip the update silently.
+    ( cd "$ZSH_CUSTOM/plugins/zoysh" 2>/dev/null && \
+      timeout 10 git fetch -q origin main 2>/dev/null && \
+      [[ "$(git rev-parse HEAD 2>/dev/null)" != "$(git rev-parse origin/main 2>/dev/null)" ]] && \
+      git pull -q origin main 2>/dev/null ) &!
 }
 
 _zoysh_maybe_selfupdate
