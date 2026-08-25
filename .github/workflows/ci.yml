@@ -40,3 +40,28 @@ jobs:
           stage="$(mktemp -d)"
           make install DESTDIR="$stage" PREFIX=/usr/local
           test -f "$stage/usr/local/share/zsh/plugins/zoysh/zoysh.plugin.zsh"
+
+  module:
+    name: Native module (experimental)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y zsh libcurl4-openssl-dev libncurses-dev
+
+      - name: Prepare a configured zsh source tree
+        run: |
+          git clone --depth 1 --branch zsh-5.9 https://github.com/zsh-users/zsh "$HOME/zsh-src"
+          cd "$HOME/zsh-src"
+          ./Util/preconfig
+          ./configure --enable-multibyte --with-term-lib=ncursesw
+          make -j"$(nproc)" -C Src zsh.mdh
+
+      - name: Build the module
+        run: make module ZSH_SRC="$HOME/zsh-src"
+
+      - name: Run gated module tests
+        run: make check-module ZSH_SRC="$HOME/zsh-src"

@@ -984,6 +984,14 @@ _zoysh_stream_call() {
     local endpoint sys_prompt request_body body_file rec type payload
     local raw="" http_status="" fallback_body="" error_message=""
     local disp_lines=0 disp_col=0 visible=0 saw_end=0
+    local engine="script" zstyle_engine helper_pid=""
+    local -i term_cols=${COLUMNS:-80}
+    (( term_cols < 10 )) && term_cols=80
+
+    zstyle -s ':zoysh:engine' engine zstyle_engine
+    if [[ "$zstyle_engine" == "module" ]] && (( ${+builtins[zoysh-call]} )); then
+        engine="module"
+    fi
 
     _ZOYSH_STREAM_ERROR=""
     endpoint="$(_zoysh_api_endpoint)"
@@ -1011,19 +1019,36 @@ _zoysh_stream_call() {
     body_file="$(mktemp "${TMPDIR:-/tmp}/zoysh-body.XXXXXX")"
     printf '%s' "$request_body" > "$body_file"
 
-    local -i term_cols=${COLUMNS:-80}
-    (( term_cols < 10 )) && term_cols=80
     _zoysh_trap_install
     local -i sfd
-    exec {sfd}< <(ZPROV="$ZOYSH_PROVIDER" ZKEY="$ZOYSH_API_KEY" \
-        ZWEB="$ZOYSH_SERVER_WEB" ZCOLS="$term_cols" ZVER="$ZOYSH_VERSION" \
-        python3 -c "$_ZOYSH_STREAM_HELPER" "$endpoint" < "$body_file")
+    if [[ "$engine" == "module" ]]; then
+        exec {sfd}< <(ZPROV="$ZOYSH_PROVIDER" ZKEY="$ZOYSH_API_KEY" \
+            ZWEB="$ZOYSH_SERVER_WEB" ZCOLS="$term_cols" \
+            zoysh-call "$endpoint" < "$body_file")
+    else
+        exec {sfd}< <(ZPROV="$ZOYSH_PROVIDER" ZKEY="$ZOYSH_API_KEY" \
+            ZWEB="$ZOYSH_SERVER_WEB" ZCOLS="$term_cols" ZVER="$ZOYSH_VERSION" \
+            python3 -c "$_ZOYSH_STREAM_HELPER" "$endpoint" < "$body_file")
+    fi
 
     while IFS= read -r -t "$ZOYSH_TIMEOUT" -d '' rec <&$sfd; do
         type="${rec[1]}"
         payload="${rec[2,-1]}"
         case "$type" in
-            P) _ZOYSH_HELPER_PGID="$payload" ;;
+            P)
+                helper_pid="$payload"
+                # The script helper setsids, so its pid doubles as the
+                # process group id for signal delivery. The module engine
+                # runs in the shell's own group and is signalled by pid.
+                if [[ "$engine" == "script" ]]; then
+                    _ZOYSH_HELPER_PGID="$payload"
+                fi
+                ;;
+            C)
+                _ZOYSH_CANCELLED=1
+                saw_end=1
+                break
+                ;;
             D)
                 if [[ "$display" == "chat" ]]; then
                     printf '%s' "$payload"
@@ -1057,6 +1082,8 @@ _zoysh_stream_call() {
     if (( ! saw_end )); then
         if [[ -n "$kill_group" ]]; then
             kill -TERM -- "-$kill_group" 2>/dev/null
+        elif [[ -n "$helper_pid" ]]; then
+            kill -TERM "$helper_pid" 2>/dev/null
         fi
         _ZOYSH_STREAM_ERROR="timed out after ${ZOYSH_TIMEOUT}s without a chunk from ${ZOYSH_PROVIDER}"
         return 1
