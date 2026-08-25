@@ -1826,6 +1826,9 @@ _zoysh_register_prefill() {
 # the NEXT shell picks the fix up. Dev checkouts are detected by the local
 # branch differing from the canonical repo path and left untouched.
 _zoysh_maybe_selfupdate() {
+    # CI and non-interactive shells never self-update (macOS runners
+    # hang on sandboxed network); require a real terminal.
+    [[ -t 0 && -t 1 ]] || return 0
     [[ -d "$ZSH_CUSTOM/plugins/zoysh/.git" ]] || return 0
     local stamp="$ZSH_CACHE_DIR/.zoysh-lastupdate"
     [[ -n "$ZSH_CACHE_DIR" ]] || ZSH_CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/omz"
