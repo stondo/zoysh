@@ -367,6 +367,107 @@ assert_eq "1" "$stub_requests" "stub records the completion request"
 zoysh_stub_stop
 ZOYSH_CONF=/dev/null
 
+# ── Streaming tests ──────────────────────────────────────────────────────────
+
+zmodload zsh/datetime
+
+stream_config() {
+    zoysh_stub_write_config "$tmp_config"
+    printf 'streaming %s\n' "$1" >> "$tmp_config"
+    ZOYSH_CONF="$tmp_config"
+    _zoysh_reload_config
+}
+
+zoysh_stub_start chat-md
+stream_config 0
+nonstream_answer="$(yo -c "explain" 2>/dev/null)"
+stream_config 1
+stream_answer="$(yo -c "explain" 2>/dev/null)"
+stream_tail="${stream_answer##*$'\033'\[2K}"
+stream_tail="${stream_tail#$'\r'}"
+assert_eq "$nonstream_answer" "$stream_tail" "streaming final render matches non-streaming output byte for byte"
+stream_request="$(python3 -c '
+import json, sys
+found = 0
+for line in open(sys.argv[1]):
+    try:
+        entry = json.loads(line)
+        body = json.loads(entry.get("body") or "{}")
+    except ValueError:
+        continue
+    if "chat/completions" in entry.get("path", "") and body.get("stream") is True:
+        found += 1
+print(found)
+' "$ZOYSH_STUB_LOG")"
+assert_eq "1" "$stream_request" "streaming requests ask the server for SSE"
+zoysh_stub_stop
+
+zoysh_stub_start think-stream
+stream_config 1
+think_answer="$(yo -c "ponder" 2>/dev/null)"
+[[ "$think_answer" == *"muses quietly"* ]] && think_leak=1 || think_leak=0
+assert_eq "0" "$think_leak" "streaming hides think blocks split across chunks"
+[[ "$think_answer" == *"visible after thinking"* ]] && think_ok=1 || think_ok=0
+assert_eq "1" "$think_ok" "streamed answer text survives think suppression"
+zoysh_stub_stop
+
+zoysh_stub_start error429
+stream_config 1
+error_answer="$(yo -c "query" 2>/dev/null)"
+[[ "$error_answer" == *"API request failed (HTTP 429): stub rate limited"* ]] && fallback_ok=1 || fallback_ok=0
+assert_eq "1" "$fallback_ok" "non-SSE error responses fall back to the blocking error path"
+zoysh_stub_stop
+
+zoysh_stub_start command
+stream_config 1
+command_stdout="$(mktemp "${TMPDIR:-/tmp}/zoysh-cmd-out.XXXXXX")"
+_zoysh_stream_call command "greet" > "$command_stdout"
+stream_call_status=$?
+assert_eq "0" "$stream_call_status" "command-mode streaming call succeeds"
+assert_eq "" "$(cat "$command_stdout")" "command mode suppresses delta output"
+parsed=$(printf '%s' "$_ZOYSH_RAW_RESPONSE" | python3 -c 'import json,sys; print(json.load(sys.stdin)["choices"][0]["message"]["content"])')
+assert_eq '{"type":"command","command":"echo hello-zoysh","explanation":"prints a greeting"}' "$parsed" "command mode still delivers the full response for parsing"
+rm -f "$command_stdout"
+zoysh_stub_stop
+
+zoysh_stub_start veryslow
+printf 'provider local\nbase_url http://127.0.0.1:%s/v1\nkey local\ntimeout 1\nstreaming 1\n' "$ZOYSH_STUB_PORT" > "$tmp_config"
+ZOYSH_CONF="$tmp_config"
+_zoysh_reload_config
+started=$EPOCHSECONDS
+timeout_answer="$(yo -c "slow query" 2>/dev/null)"
+timed_out=$(( EPOCHSECONDS - started ))
+[[ "$timeout_answer" == *"timed out after 1s without a chunk from local"* ]] && timeout_ok=1 || timeout_ok=0
+assert_eq "1" "$timeout_ok" "idle timeout reports while the server stalls"
+(( timed_out < 10 )) && timeout_fast=1 || timeout_fast=0
+assert_eq "1" "$timeout_fast" "idle timeout returns promptly (${timed_out}s)"
+zoysh_stub_stop
+
+zoysh_stub_start slow
+stream_config 1
+progress_file="$(mktemp "${TMPDIR:-/tmp}/zoysh-progress.XXXXXX")"
+(_zoysh_stream_call chat "count slowly" > "$progress_file" 2>/dev/null) &
+progress_pid=$!
+progress_seen=0
+for (( i = 0; i < 80; i++ )); do
+    grep -q "counting " "$progress_file" 2>/dev/null && { progress_seen=1; break }
+    sleep 0.1
+done
+assert_eq "1" "$progress_seen" "slow stream delivers its first chunk promptly"
+grep -q "three." "$progress_file" 2>/dev/null && early_finish=1 || early_finish=0
+assert_eq "0" "$early_finish" "later chunks have not arrived yet at first-poll time"
+wait "$progress_pid"
+grep -q "three." "$progress_file" 2>/dev/null && late_finish=1 || late_finish=0
+assert_eq "1" "$late_finish" "slow stream completes after all chunks arrive"
+rm -f "$progress_file"
+zoysh_stub_stop
+
+printf 'provider local\nbase_url http://127.0.0.1:%s/v1\nkey local\nstreaming maybe\n' "$ZOYSH_STUB_PORT" > "$tmp_config"
+ZOYSH_CONF="$tmp_config"
+_zoysh_reload_config 2>/dev/null
+assert_eq "1" "$ZOYSH_STREAMING" "invalid streaming value falls back to enabled"
+ZOYSH_CONF=/dev/null
+
 print -r -- "1..${TESTS_RUN}"
 if (( TESTS_FAILED )); then
     print -u2 -r -- "${TESTS_FAILED} test(s) failed"

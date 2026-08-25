@@ -91,7 +91,8 @@ server_web 1
 | `history_limit` | `10` | Maximum remembered `yo` exchanges |
 | `token_budget` | `4096` | Approximate token budget for remembered conversation history |
 | `max_output_tokens` | `4096` | Maximum tokens generated for one response |
-| `timeout` | `30` | HTTP timeout in seconds |
+| `timeout` | `30` | Seconds to wait for a connection or, when streaming, for the next chunk |
+| `streaming` | `1` | Stream responses over SSE; `0` sends one blocking request |
 | `server_web` | `1` | Enable hosted web search for Anthropic Messages and OpenAI Responses |
 | `chat_prefix` | cyan `yo` heading | Text printed before chat responses |
 | `color_prefix` | terminal reset | Base chat text style |
@@ -190,6 +191,7 @@ to `0600`.
 
 - **Command generation** — natural language to zsh command, prefilled for review
 - **Inline Q&A** — ask questions without leaving the terminal
+- **Streaming responses** — chat answers appear token by token over SSE, then re-render as terminal Markdown; thinking models stream with `<think>` reasoning hidden
 - **Session memory** — remembers conversation context within a session
 - **Multi-provider** — Anthropic, OpenAI, OpenRouter, Kimi, DeepSeek, Qwen, z.ai, local models
 - **Shell-aware** — includes OS, zsh version, working directory, and git branch in context
@@ -223,9 +225,9 @@ Generated commands are untrusted model output. Zoysh only prefills the prompt; r
 - [x] Plugin manager compatibility (zinit, antidote, zplug, oh-my-zsh)
 - [x] CI testing
 
-Streaming responses remain a possible Phase 1 enhancement:
+Streaming responses are now part of Phase 1:
 
-- [ ] Streaming responses
+- [x] Streaming responses
 
 Session memory includes earlier `yo` exchanges. Arbitrary terminal-output capture remains a Phase 2 feature because it requires a PTY proxy.
 

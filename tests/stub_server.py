@@ -93,7 +93,7 @@ SCRIPTS = {
 }
 
 CHUNK_DELAY = {
-    "slow": 0.4,
+    "slow": 0.6,
 }
 
 FIRST_CHUNK_DELAY = {
